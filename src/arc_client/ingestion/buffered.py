@@ -166,9 +166,7 @@ class BufferedWriter:
             if self._buffers[measurement]:
                 self._flush_measurement(measurement)
 
-    def _merge_columnar(
-        self, batches: list[dict[str, list[Any]]]
-    ) -> dict[str, list[Any]]:
+    def _merge_columnar(self, batches: list[dict[str, list[Any]]]) -> dict[str, list[Any]]:
         """Merge multiple columnar batches into one."""
         if not batches:
             return {}

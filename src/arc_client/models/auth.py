@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -23,12 +24,12 @@ class TokenInfo(BaseModel):
 
     id: int
     name: str
-    description: str | None = None
+    description: Optional[str] = None
     permissions: list[str] = Field(default_factory=list)
-    created_at: datetime | None = None
-    last_used_at: datetime | None = None
+    created_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
     enabled: bool = True
-    expires_at: datetime | None = None
+    expires_at: Optional[datetime] = None
 
 
 class VerifyResponse(BaseModel):
@@ -42,9 +43,9 @@ class VerifyResponse(BaseModel):
     """
 
     valid: bool
-    token_info: TokenInfo | None = None
-    permissions: list[str] | None = None
-    error: str | None = None
+    token_info: Optional[TokenInfo] = None
+    permissions: Optional[list[str]] = None
+    error: Optional[str] = None
 
 
 class CreateTokenResponse(BaseModel):
@@ -58,9 +59,9 @@ class CreateTokenResponse(BaseModel):
     """
 
     success: bool
-    token: str | None = None
-    message: str | None = None
-    error: str | None = None
+    token: Optional[str] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
 
 
 class TokenListResponse(BaseModel):
@@ -76,7 +77,7 @@ class TokenListResponse(BaseModel):
     success: bool
     tokens: list[TokenInfo] = Field(default_factory=list)
     count: int = 0
-    error: str | None = None
+    error: Optional[str] = None
 
 
 class RotateTokenResponse(BaseModel):
@@ -90,6 +91,6 @@ class RotateTokenResponse(BaseModel):
     """
 
     success: bool
-    new_token: str | None = None
-    message: str | None = None
-    error: str | None = None
+    new_token: Optional[str] = None
+    message: Optional[str] = None
+    error: Optional[str] = None

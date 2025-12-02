@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, List, Optional
+
 from arc_client.config import ClientConfig
 from arc_client.exceptions import ArcError, ArcNotFoundError
 from arc_client.http.sync_http import SyncHTTPClient
@@ -24,7 +26,7 @@ class RetentionClient:
         name: str,
         database: str,
         retention_days: int,
-        measurement: str | None = None,
+        measurement: Optional[str] = None,
         buffer_days: int = 7,
         is_active: bool = True,
     ) -> RetentionPolicy:
@@ -48,7 +50,7 @@ class RetentionClient:
         except Exception as e:
             raise ArcError(f"Failed to create retention policy: {e}") from e
 
-    def list(self) -> list[RetentionPolicy]:
+    def list(self) -> List[RetentionPolicy]:
         """List all retention policies."""
         try:
             response = self._http.get("/api/v1/retention")
@@ -77,14 +79,14 @@ class RetentionClient:
     def update(
         self,
         policy_id: int,
-        name: str | None = None,
-        retention_days: int | None = None,
-        measurement: str | None = None,
-        buffer_days: int | None = None,
-        is_active: bool | None = None,
+        name: Optional[str] = None,
+        retention_days: Optional[int] = None,
+        measurement: Optional[str] = None,
+        buffer_days: Optional[int] = None,
+        is_active: Optional[bool] = None,
     ) -> RetentionPolicy:
         """Update a retention policy."""
-        payload: dict = {}
+        payload: dict[str, Any] = {}
         if name is not None:
             payload["name"] = name
         if retention_days is not None:
@@ -131,15 +133,13 @@ class RetentionClient:
         """Execute a retention policy."""
         payload = {"dry_run": dry_run, "confirm": confirm}
         try:
-            response = self._http.post(
-                f"/api/v1/retention/{policy_id}/execute", json=payload
-            )
+            response = self._http.post(f"/api/v1/retention/{policy_id}/execute", json=payload)
             data = response.json()
             return ExecuteRetentionResponse(**data)
         except Exception as e:
             raise ArcError(f"Failed to execute retention policy: {e}") from e
 
-    def get_executions(self, policy_id: int, limit: int = 50) -> list[RetentionExecution]:
+    def get_executions(self, policy_id: int, limit: int = 50) -> List[RetentionExecution]:
         """Get execution history for a policy."""
         try:
             response = self._http.get(

@@ -53,7 +53,7 @@ def main():
 
         elapsed = time.time() - start
         print(f"\nWrote {count} records in {elapsed:.2f}s")
-        print(f"Throughput: {count/elapsed:,.0f} records/sec")
+        print(f"Throughput: {count / elapsed:,.0f} records/sec")
 
 
 if __name__ == "__main__":

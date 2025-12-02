@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,8 +25,8 @@ class QueryResponse(BaseModel):
     data: list[list[Any]] = Field(default_factory=list)
     row_count: int = 0
     execution_time_ms: float = 0.0
-    timestamp: str | None = None
-    error: str | None = None
+    timestamp: Optional[str] = None
+    error: Optional[str] = None
 
 
 class EstimateResponse(BaseModel):
@@ -42,11 +42,11 @@ class EstimateResponse(BaseModel):
     """
 
     success: bool
-    estimated_rows: int | None = None
+    estimated_rows: Optional[int] = None
     warning_level: str = "none"
-    warning_message: str | None = None
+    warning_message: Optional[str] = None
     execution_time_ms: float = 0.0
-    error: str | None = None
+    error: Optional[str] = None
 
 
 class MeasurementInfo(BaseModel):
@@ -64,4 +64,4 @@ class MeasurementInfo(BaseModel):
     measurement: str
     file_count: int = 0
     total_size_mb: float = 0.0
-    storage_path: str | None = None
+    storage_path: Optional[str] = None

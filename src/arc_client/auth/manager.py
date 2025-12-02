@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, List, Optional
+
 from arc_client.config import ClientConfig
 from arc_client.exceptions import ArcAuthenticationError, ArcNotFoundError
 from arc_client.http.sync_http import SyncHTTPClient
@@ -50,12 +52,12 @@ class AuthClient:
     def create_token(
         self,
         name: str,
-        description: str | None = None,
-        permissions: list[str] | None = None,
-        expires_in: str | None = None,
+        description: Optional[str] = None,
+        permissions: Optional[list[str]] = None,
+        expires_in: Optional[str] = None,
     ) -> CreateTokenResponse:
         """Create a new API token. Requires admin permissions."""
-        payload: dict = {"name": name}
+        payload: dict[str, Any] = {"name": name}
         if description:
             payload["description"] = description
         if permissions:
@@ -72,7 +74,7 @@ class AuthClient:
         except Exception as e:
             raise ArcAuthenticationError(f"Failed to create token: {e}") from e
 
-    def list_tokens(self) -> list[TokenInfo]:
+    def list_tokens(self) -> List[TokenInfo]:
         """List all tokens. Requires admin permissions."""
         try:
             response = self._http.get("/api/v1/auth/tokens")
@@ -105,13 +107,13 @@ class AuthClient:
     def update_token(
         self,
         token_id: int,
-        name: str | None = None,
-        description: str | None = None,
-        permissions: list[str] | None = None,
-        expires_in: str | None = None,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        permissions: Optional[list[str]] = None,
+        expires_in: Optional[str] = None,
     ) -> None:
         """Update token properties. Requires admin permissions."""
-        payload: dict = {}
+        payload: dict[str, Any] = {}
         if name is not None:
             payload["name"] = name
         if description is not None:

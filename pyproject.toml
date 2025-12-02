@@ -72,6 +72,12 @@ target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = [
+    "UP006",  # Use `list` instead of `List` - not available in py39 without __future__.annotations
+    "UP007",  # Use `X | Y` for type unions - requires Python 3.10+
+    "UP035",  # `typing.List` is deprecated - still needed for py39 compatibility
+    "UP045",  # Use `X | None` for type annotations - requires Python 3.10+
+]
 
 [tool.mypy]
 python_version = "3.9"

@@ -15,7 +15,7 @@ Line Protocol is provided for compatibility with existing tooling.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from arc_client.exceptions import ArcValidationError
 
@@ -23,8 +23,8 @@ from arc_client.exceptions import ArcValidationError
 def format_line_protocol(
     measurement: str,
     fields: dict[str, Any],
-    tags: dict[str, str] | None = None,
-    timestamp: int | None = None,
+    tags: Optional[dict[str, str]] = None,
+    timestamp: Optional[int] = None,
     time_unit: str = "us",
 ) -> str:
     """Format a single data point as InfluxDB Line Protocol.
@@ -138,7 +138,7 @@ def format_lines(
 def format_columnar_as_lines(
     measurement: str,
     columns: dict[str, list[Any]],
-    tag_columns: list[str] | None = None,
+    tag_columns: Optional[list[str]] = None,
     time_column: str = "time",
     time_unit: str = "us",
 ) -> str:

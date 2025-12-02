@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -10,21 +12,21 @@ class ContinuousQuery(BaseModel):
 
     id: int
     name: str
-    description: str | None = None
+    description: Optional[str] = None
     database: str
     source_measurement: str
     destination_measurement: str
     query: str
     interval: str
-    retention_days: int | None = None
-    delete_source_after_days: int | None = None
+    retention_days: Optional[int] = None
+    delete_source_after_days: Optional[int] = None
     is_active: bool = True
-    last_execution_time: str | None = None
-    last_execution_status: str | None = None
-    last_processed_time: str | None = None
-    last_records_written: int | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
+    last_execution_time: Optional[str] = None
+    last_execution_status: Optional[str] = None
+    last_processed_time: Optional[str] = None
+    last_records_written: Optional[int] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
 
 
 class ExecuteCQResponse(BaseModel):
@@ -36,14 +38,14 @@ class ExecuteCQResponse(BaseModel):
     status: str
     start_time: str
     end_time: str
-    records_read: int | None = None
+    records_read: Optional[int] = None
     records_written: int = 0
     execution_time_seconds: float = 0.0
     destination_measurement: str
     dry_run: bool = False
-    executed_at: str | None = None
-    executed_query: str | None = None
-    error: str | None = None
+    executed_at: Optional[str] = None
+    executed_query: Optional[str] = None
+    error: Optional[str] = None
 
 
 class CQExecution(BaseModel):
@@ -56,7 +58,7 @@ class CQExecution(BaseModel):
     status: str
     start_time: str
     end_time: str
-    records_read: int | None = None
+    records_read: Optional[int] = None
     records_written: int = 0
     execution_duration_seconds: float = 0.0
-    error_message: str | None = None
+    error_message: Optional[str] = None

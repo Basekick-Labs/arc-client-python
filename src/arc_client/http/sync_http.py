@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 
@@ -19,7 +19,7 @@ class SyncHTTPClient(HTTPClientBase):
 
     def __init__(self, config: ClientConfig) -> None:
         super().__init__(config)
-        self._client: httpx.Client | None = None
+        self._client: Optional[httpx.Client] = None
 
     def _get_client(self) -> httpx.Client:
         """Get or create the httpx client."""
@@ -40,8 +40,8 @@ class SyncHTTPClient(HTTPClientBase):
     def get(
         self,
         path: str,
-        params: dict[str, Any] | None = None,
-        headers: dict[str, str] | None = None,
+        params: Optional[dict[str, Any]] = None,
+        headers: Optional[dict[str, str]] = None,
     ) -> httpx.Response:
         """Make a GET request."""
         kwargs = self._prepare_request_kwargs(headers=headers, params=params)
@@ -56,10 +56,10 @@ class SyncHTTPClient(HTTPClientBase):
     def post(
         self,
         path: str,
-        json: Any | None = None,
-        content: bytes | None = None,
-        params: dict[str, Any] | None = None,
-        headers: dict[str, str] | None = None,
+        json: Optional[Any] = None,
+        content: Optional[bytes] = None,
+        params: Optional[dict[str, Any]] = None,
+        headers: Optional[dict[str, str]] = None,
     ) -> httpx.Response:
         """Make a POST request."""
         kwargs = self._prepare_request_kwargs(headers=headers, params=params)
@@ -78,9 +78,9 @@ class SyncHTTPClient(HTTPClientBase):
     def put(
         self,
         path: str,
-        json: Any | None = None,
-        params: dict[str, Any] | None = None,
-        headers: dict[str, str] | None = None,
+        json: Optional[Any] = None,
+        params: Optional[dict[str, Any]] = None,
+        headers: Optional[dict[str, str]] = None,
     ) -> httpx.Response:
         """Make a PUT request."""
         kwargs = self._prepare_request_kwargs(headers=headers, params=params)
@@ -97,9 +97,9 @@ class SyncHTTPClient(HTTPClientBase):
     def patch(
         self,
         path: str,
-        json: Any | None = None,
-        params: dict[str, Any] | None = None,
-        headers: dict[str, str] | None = None,
+        json: Optional[Any] = None,
+        params: Optional[dict[str, Any]] = None,
+        headers: Optional[dict[str, str]] = None,
     ) -> httpx.Response:
         """Make a PATCH request."""
         kwargs = self._prepare_request_kwargs(headers=headers, params=params)
@@ -116,8 +116,8 @@ class SyncHTTPClient(HTTPClientBase):
     def delete(
         self,
         path: str,
-        params: dict[str, Any] | None = None,
-        headers: dict[str, str] | None = None,
+        params: Optional[dict[str, Any]] = None,
+        headers: Optional[dict[str, str]] = None,
     ) -> httpx.Response:
         """Make a DELETE request."""
         kwargs = self._prepare_request_kwargs(headers=headers, params=params)

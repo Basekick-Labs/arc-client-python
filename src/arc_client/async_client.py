@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from arc_client.config import ClientConfig
 from arc_client.http.async_http import AsyncHTTPClient
@@ -33,7 +33,7 @@ class AsyncArcClient:
         self,
         host: str = "localhost",
         port: int = 8000,
-        token: str | None = None,
+        token: Optional[str] = None,
         database: str = "default",
         timeout: float = 30.0,
         compression: bool = True,
@@ -62,7 +62,7 @@ class AsyncArcClient:
             ssl=ssl,
             verify_ssl=verify_ssl,
         )
-        self._http: AsyncHTTPClient | None = None
+        self._http: Optional[AsyncHTTPClient] = None
 
         # Lazy-initialized sub-clients
         self._write: Any = None

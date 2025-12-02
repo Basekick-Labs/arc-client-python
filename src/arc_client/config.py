@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -10,7 +12,7 @@ class ClientConfig(BaseModel):
 
     host: str = Field(default="localhost", description="Arc server hostname")
     port: int = Field(default=8000, description="Arc server port")
-    token: str | None = Field(default=None, description="API token for authentication")
+    token: Optional[str] = Field(default=None, description="API token for authentication")
     database: str = Field(default="default", description="Default database name")
     timeout: float = Field(default=30.0, description="Request timeout in seconds")
     compression: bool = Field(default=True, description="Enable gzip compression for writes")

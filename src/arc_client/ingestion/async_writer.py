@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from arc_client.config import ClientConfig
 from arc_client.exceptions import ArcIngestionError, ArcValidationError
@@ -46,8 +46,8 @@ class AsyncWriteClient:
         self,
         measurement: str,
         columns: dict[str, list[Any]],
-        database: str | None = None,
-        compress: bool | None = None,
+        database: Optional[str] = None,
+        compress: Optional[bool] = None,
         time_unit: str = "us",
     ) -> None:
         """Write columnar data to Arc (highest performance method).
@@ -71,8 +71,8 @@ class AsyncWriteClient:
     async def write_records(
         self,
         records: list[dict[str, Any]],
-        database: str | None = None,
-        compress: bool | None = None,
+        database: Optional[str] = None,
+        compress: Optional[bool] = None,
     ) -> None:
         """Write records to Arc using MessagePack row format."""
         try:
@@ -88,10 +88,10 @@ class AsyncWriteClient:
         self,
         df: Any,
         measurement: str,
-        database: str | None = None,
+        database: Optional[str] = None,
         time_column: str = "time",
-        tag_columns: list[str] | None = None,
-        compress: bool | None = None,
+        tag_columns: Optional[list[str]] = None,
+        compress: Optional[bool] = None,
     ) -> None:
         """Write a DataFrame to Arc."""
         try:
@@ -106,8 +106,8 @@ class AsyncWriteClient:
     async def write_line_protocol(
         self,
         lines: str | list[str],
-        database: str | None = None,
-        compress: bool | None = None,
+        database: Optional[str] = None,
+        compress: Optional[bool] = None,
     ) -> None:
         """Write data using InfluxDB Line Protocol format."""
         data = "\n".join(lines) if isinstance(lines, list) else lines
@@ -117,10 +117,10 @@ class AsyncWriteClient:
         self,
         measurement: str,
         fields: dict[str, Any],
-        tags: dict[str, str] | None = None,
-        timestamp: int | None = None,
-        database: str | None = None,
-        compress: bool | None = None,
+        tags: Optional[dict[str, str]] = None,
+        timestamp: Optional[int] = None,
+        database: Optional[str] = None,
+        compress: Optional[bool] = None,
     ) -> None:
         """Write a single data point using Line Protocol."""
         line = format_line_protocol(measurement, fields, tags, timestamp)
@@ -139,8 +139,8 @@ class AsyncWriteClient:
     async def _write_msgpack(
         self,
         data: bytes,
-        database: str | None,
-        compress: bool | None,
+        database: Optional[str],
+        compress: Optional[bool],
     ) -> None:
         """Send MessagePack data to Arc."""
         should_compress = compress if compress is not None else self._config.compression
@@ -175,8 +175,8 @@ class AsyncWriteClient:
     async def _write_line_protocol(
         self,
         data: bytes,
-        database: str | None,
-        compress: bool | None,
+        database: Optional[str],
+        compress: Optional[bool],
     ) -> None:
         """Send Line Protocol data to Arc."""
         should_compress = compress if compress is not None else self._config.compression

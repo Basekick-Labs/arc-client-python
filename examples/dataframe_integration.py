@@ -8,13 +8,15 @@ def pandas_example(client: ArcClient):
     import pandas as pd
 
     # Create a DataFrame
-    df = pd.DataFrame({
-        "time": pd.date_range("2024-01-01", periods=100, freq="1min"),
-        "host": ["server-01"] * 50 + ["server-02"] * 50,
-        "region": ["us-east"] * 100,
-        "cpu_usage": [50 + i * 0.1 for i in range(100)],
-        "memory_mb": [1024 + i for i in range(100)],
-    })
+    df = pd.DataFrame(
+        {
+            "time": pd.date_range("2024-01-01", periods=100, freq="1min"),
+            "host": ["server-01"] * 50 + ["server-02"] * 50,
+            "region": ["us-east"] * 100,
+            "cpu_usage": [50 + i * 0.1 for i in range(100)],
+            "memory_mb": [1024 + i for i in range(100)],
+        }
+    )
 
     # Write DataFrame to Arc
     client.write.write_dataframe(

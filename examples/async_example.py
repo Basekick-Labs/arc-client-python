@@ -26,9 +26,7 @@ async def main():
 
         # Query with Arrow (zero-copy, best for large results)
         # Use database.measurement syntax
-        table = await client.query.query_arrow(
-            "SELECT * FROM default.temperature ORDER BY time"
-        )
+        table = await client.query.query_arrow("SELECT * FROM default.temperature ORDER BY time")
         print(f"\nArrow table: {table.num_rows} rows, {table.num_columns} columns")
         print(table.to_pandas())
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 
@@ -17,7 +17,7 @@ from arc_client.exceptions import (
 
 
 def build_headers(
-    config: ClientConfig, extra_headers: dict[str, str] | None = None
+    config: ClientConfig, extra_headers: Optional[dict[str, str]] = None
 ) -> dict[str, str]:
     """Build request headers with authentication."""
     headers: dict[str, str] = {
@@ -78,7 +78,7 @@ class HTTPClientBase:
 
     def _prepare_request_kwargs(
         self,
-        headers: dict[str, str] | None = None,
+        headers: Optional[dict[str, str]] = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Prepare common request kwargs."""

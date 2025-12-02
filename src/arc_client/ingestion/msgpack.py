@@ -26,7 +26,7 @@ Row Format (LEGACY):
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Optional
 
 import msgpack
 
@@ -78,9 +78,7 @@ def encode_columnar(
     lengths = {name: len(values) for name, values in columns.items()}
     unique_lengths = set(lengths.values())
     if len(unique_lengths) > 1:
-        raise ArcValidationError(
-            f"All columns must have the same length. Got: {lengths}"
-        )
+        raise ArcValidationError(f"All columns must have the same length. Got: {lengths}")
 
     # Ensure 'time' column exists
     if "time" not in columns:
@@ -98,7 +96,8 @@ def encode_columnar(
         "columns": columns,
     }
 
-    return msgpack.packb(payload, use_bin_type=True)
+    result: bytes = msgpack.packb(payload, use_bin_type=True)
+    return result
 
 
 def encode_records(records: list[dict[str, Any]]) -> bytes:
@@ -136,7 +135,8 @@ def encode_records(records: list[dict[str, Any]]) -> bytes:
         payload.append(item)
 
     # Wrap in batch format
-    return msgpack.packb(payload, use_bin_type=True)
+    result: bytes = msgpack.packb(payload, use_bin_type=True)
+    return result
 
 
 def encode_single_record(record: dict[str, Any]) -> bytes:
@@ -149,7 +149,8 @@ def encode_single_record(record: dict[str, Any]) -> bytes:
         MessagePack encoded bytes.
     """
     payload = _encode_single_record(record)
-    return msgpack.packb(payload, use_bin_type=True)
+    result: bytes = msgpack.packb(payload, use_bin_type=True)
+    return result
 
 
 def encode_batch(items: list[dict[str, Any]]) -> bytes:
@@ -167,7 +168,8 @@ def encode_batch(items: list[dict[str, Any]]) -> bytes:
         raise ArcValidationError("Batch cannot be empty")
 
     payload = {"batch": items}
-    return msgpack.packb(payload, use_bin_type=True)
+    result: bytes = msgpack.packb(payload, use_bin_type=True)
+    return result
 
 
 def _encode_single_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -194,9 +196,7 @@ def _encode_single_record(record: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _normalize_timestamps(
-    columns: dict[str, list[Any]], time_unit: str
-) -> dict[str, list[Any]]:
+def _normalize_timestamps(columns: dict[str, list[Any]], time_unit: str) -> dict[str, list[Any]]:
     """Normalize timestamps to microseconds.
 
     Arc expects timestamps in microseconds. This function converts from
@@ -239,7 +239,7 @@ def dataframe_to_columnar(
     df: Any,
     measurement: str,
     time_column: str = "time",
-    tag_columns: list[str] | None = None,
+    tag_columns: Optional[list[str]] = None,
 ) -> dict[str, list[Any]]:
     """Convert a DataFrame to columnar format for Arc ingestion.
 
@@ -276,9 +276,7 @@ def dataframe_to_columnar(
         )
 
 
-def _pandas_to_columnar(
-    df: Any, time_column: str, tag_columns: list[str]
-) -> dict[str, list[Any]]:
+def _pandas_to_columnar(df: Any, time_column: str, tag_columns: list[str]) -> dict[str, list[Any]]:
     """Convert pandas DataFrame to columnar format."""
     import pandas as pd
 
@@ -305,9 +303,7 @@ def _pandas_to_columnar(
     return columns
 
 
-def _polars_to_columnar(
-    df: Any, time_column: str, tag_columns: list[str]
-) -> dict[str, list[Any]]:
+def _polars_to_columnar(df: Any, time_column: str, tag_columns: list[str]) -> dict[str, list[Any]]:
     """Convert Polars DataFrame to columnar format."""
     if time_column not in df.columns:
         raise ArcValidationError(f"Time column '{time_column}' not found in DataFrame")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 import pyarrow as pa
 import pyarrow.ipc as ipc
@@ -43,7 +43,7 @@ class QueryClient:
         self._http = http
         self._config = config
 
-    def query(self, sql: str, database: str | None = None) -> QueryResponse:
+    def query(self, sql: str, database: Optional[str] = None) -> QueryResponse:
         """Execute a SQL query and return results as JSON.
 
         This method returns structured JSON data. For large result sets,
@@ -87,7 +87,7 @@ class QueryClient:
         except Exception as e:
             raise ArcQueryError(f"Query failed: {e}") from e
 
-    def query_pandas(self, sql: str, database: str | None = None) -> Any:
+    def query_pandas(self, sql: str, database: Optional[str] = None) -> Any:
         """Execute a SQL query and return results as a pandas DataFrame.
 
         Uses Arrow IPC streaming for efficient data transfer. Requires
@@ -119,7 +119,7 @@ class QueryClient:
         table = self.query_arrow(sql, database)
         return table.to_pandas()
 
-    def query_polars(self, sql: str, database: str | None = None) -> Any:
+    def query_polars(self, sql: str, database: Optional[str] = None) -> Any:
         """Execute a SQL query and return results as a Polars DataFrame.
 
         Uses Arrow IPC streaming for efficient zero-copy data transfer.
@@ -152,7 +152,7 @@ class QueryClient:
         table = self.query_arrow(sql, database)
         return pl.from_arrow(table)
 
-    def query_arrow(self, sql: str, database: str | None = None) -> pa.Table:
+    def query_arrow(self, sql: str, database: Optional[str] = None) -> pa.Table:
         """Execute a SQL query and return results as a PyArrow Table.
 
         Uses Arrow IPC streaming for efficient zero-copy data transfer.
@@ -195,9 +195,7 @@ class QueryClient:
             content_type = response.headers.get("content-type", "")
             if "application/json" in content_type:
                 error_data = response.json()
-                raise ArcQueryError(
-                    error_data.get("error", "Query failed with unknown error")
-                )
+                raise ArcQueryError(error_data.get("error", "Query failed with unknown error"))
 
             # Parse Arrow IPC stream
             reader = ipc.open_stream(response.content)
@@ -210,7 +208,7 @@ class QueryClient:
         except Exception as e:
             raise ArcQueryError(f"Query failed: {e}") from e
 
-    def estimate(self, sql: str, database: str | None = None) -> EstimateResponse:
+    def estimate(self, sql: str, database: Optional[str] = None) -> EstimateResponse:
         """Estimate the cost of a SQL query.
 
         Returns an estimate of how many rows the query will return and
@@ -255,7 +253,7 @@ class QueryClient:
         except Exception as e:
             raise ArcQueryError(f"Estimation failed: {e}") from e
 
-    def list_measurements(self, database: str | None = None) -> list[MeasurementInfo]:
+    def list_measurements(self, database: Optional[str] = None) -> list[MeasurementInfo]:
         """List all measurements in the database.
 
         Args:
@@ -320,7 +318,7 @@ class QueryClient:
         except Exception as e:
             raise ArcQueryError(f"Failed to list databases: {e}") from e
 
-    def show_tables(self, database: str | None = None) -> QueryResponse:
+    def show_tables(self, database: Optional[str] = None) -> QueryResponse:
         """Show tables/measurements in a database.
 
         Args:

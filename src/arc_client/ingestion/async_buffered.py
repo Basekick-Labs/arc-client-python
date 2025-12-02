@@ -121,9 +121,7 @@ class AsyncBufferedWriter:
             if self._buffers[measurement]:
                 await self._flush_measurement_unlocked(measurement)
 
-    def _merge_columnar(
-        self, batches: list[dict[str, list[Any]]]
-    ) -> dict[str, list[Any]]:
+    def _merge_columnar(self, batches: list[dict[str, list[Any]]]) -> dict[str, list[Any]]:
         """Merge multiple columnar batches into one."""
         if not batches:
             return {}

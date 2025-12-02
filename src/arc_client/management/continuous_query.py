@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any, List, Optional, Union
 
 from arc_client.config import ClientConfig
 from arc_client.exceptions import ArcError, ArcNotFoundError
@@ -29,9 +30,9 @@ class ContinuousQueryClient:
         destination_measurement: str,
         query: str,
         interval: str,
-        description: str | None = None,
-        retention_days: int | None = None,
-        delete_source_after_days: int | None = None,
+        description: Optional[str] = None,
+        retention_days: Optional[int] = None,
+        delete_source_after_days: Optional[int] = None,
         is_active: bool = True,
     ) -> ContinuousQuery:
         """Create a new continuous query."""
@@ -59,11 +60,11 @@ class ContinuousQueryClient:
             raise ArcError(f"Failed to create continuous query: {e}") from e
 
     def list(
-        self, database: str | None = None, is_active: bool | None = None
-    ) -> list[ContinuousQuery]:
+        self, database: Optional[str] = None, is_active: Optional[bool] = None
+    ) -> List[ContinuousQuery]:
         """List all continuous queries."""
         try:
-            params = {}
+            params: dict[str, Any] = {}
             if database:
                 params["database"] = database
             if is_active is not None:
@@ -95,16 +96,16 @@ class ContinuousQueryClient:
     def update(
         self,
         query_id: int,
-        name: str | None = None,
-        description: str | None = None,
-        query: str | None = None,
-        interval: str | None = None,
-        retention_days: int | None = None,
-        delete_source_after_days: int | None = None,
-        is_active: bool | None = None,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        query: Optional[str] = None,
+        interval: Optional[str] = None,
+        retention_days: Optional[int] = None,
+        delete_source_after_days: Optional[int] = None,
+        is_active: Optional[bool] = None,
     ) -> ContinuousQuery:
         """Update a continuous query."""
-        payload: dict = {}
+        payload: dict[str, Any] = {}
         if name is not None:
             payload["name"] = name
         if description is not None:
@@ -121,9 +122,7 @@ class ContinuousQueryClient:
             payload["is_active"] = is_active
 
         try:
-            response = self._http.put(
-                f"/api/v1/continuous_queries/{query_id}", json=payload
-            )
+            response = self._http.put(f"/api/v1/continuous_queries/{query_id}", json=payload)
             data = response.json()
             if not data.get("success", True):
                 error = data.get("error", "Unknown error")
@@ -154,12 +153,12 @@ class ContinuousQueryClient:
     def execute(
         self,
         query_id: int,
-        start_time: datetime | str | None = None,
-        end_time: datetime | str | None = None,
+        start_time: Union[datetime, str, None] = None,
+        end_time: Union[datetime, str, None] = None,
         dry_run: bool = False,
     ) -> ExecuteCQResponse:
         """Execute a continuous query manually."""
-        payload: dict = {"dry_run": dry_run}
+        payload: dict[str, Any] = {"dry_run": dry_run}
         if start_time:
             payload["start_time"] = (
                 start_time.isoformat() if isinstance(start_time, datetime) else start_time
@@ -178,7 +177,7 @@ class ContinuousQueryClient:
         except Exception as e:
             raise ArcError(f"Failed to execute continuous query: {e}") from e
 
-    def get_executions(self, query_id: int, limit: int = 50) -> list[CQExecution]:
+    def get_executions(self, query_id: int, limit: int = 50) -> List[CQExecution]:
         """Get execution history for a query."""
         try:
             response = self._http.get(

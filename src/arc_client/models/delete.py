@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -26,7 +28,7 @@ class DeleteResponse(BaseModel):
     execution_time_ms: float = 0.0
     dry_run: bool = False
     files_processed: list[str] = Field(default_factory=list)
-    error: str | None = None
+    error: Optional[str] = None
 
 
 class DeleteConfigResponse(BaseModel):

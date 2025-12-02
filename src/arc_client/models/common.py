@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 from pydantic import BaseModel
 
 
@@ -9,12 +11,12 @@ class HealthResponse(BaseModel):
     """Response from the health check endpoint."""
 
     status: str
-    version: str | None = None
-    uptime: str | None = None
+    version: Optional[str] = None
+    uptime: Optional[str] = None
 
 
 class ReadyResponse(BaseModel):
     """Response from the readiness check endpoint."""
 
     ready: bool
-    message: str | None = None
+    message: Optional[str] = None

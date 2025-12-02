@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, List, Optional
+
 from arc_client.config import ClientConfig
 from arc_client.exceptions import ArcAuthenticationError, ArcNotFoundError
 from arc_client.http.async_http import AsyncHTTPClient
@@ -38,12 +40,12 @@ class AsyncAuthClient:
     async def create_token(
         self,
         name: str,
-        description: str | None = None,
-        permissions: list[str] | None = None,
-        expires_in: str | None = None,
+        description: Optional[str] = None,
+        permissions: Optional[list[str]] = None,
+        expires_in: Optional[str] = None,
     ) -> CreateTokenResponse:
         """Create a new API token. Requires admin permissions."""
-        payload: dict = {"name": name}
+        payload: dict[str, Any] = {"name": name}
         if description:
             payload["description"] = description
         if permissions:
@@ -60,7 +62,7 @@ class AsyncAuthClient:
         except Exception as e:
             raise ArcAuthenticationError(f"Failed to create token: {e}") from e
 
-    async def list_tokens(self) -> list[TokenInfo]:
+    async def list_tokens(self) -> List[TokenInfo]:
         """List all tokens. Requires admin permissions."""
         try:
             response = await self._http.get("/api/v1/auth/tokens")
@@ -93,13 +95,13 @@ class AsyncAuthClient:
     async def update_token(
         self,
         token_id: int,
-        name: str | None = None,
-        description: str | None = None,
-        permissions: list[str] | None = None,
-        expires_in: str | None = None,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        permissions: Optional[list[str]] = None,
+        expires_in: Optional[str] = None,
     ) -> None:
         """Update token properties. Requires admin permissions."""
-        payload: dict = {}
+        payload: dict[str, Any] = {}
         if name is not None:
             payload["name"] = name
         if description is not None:
@@ -110,9 +112,7 @@ class AsyncAuthClient:
             payload["expires_in"] = expires_in
 
         try:
-            response = await self._http.patch(
-                f"/api/v1/auth/tokens/{token_id}", json=payload
-            )
+            response = await self._http.patch(f"/api/v1/auth/tokens/{token_id}", json=payload)
             data = response.json()
             if not data.get("success", True):
                 error = data.get("error", "Unknown error")
