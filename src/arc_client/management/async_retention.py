@@ -1,0 +1,157 @@
+"""Asynchronous retention policy client for Arc."""
+
+from __future__ import annotations
+
+from arc_client.config import ClientConfig
+from arc_client.exceptions import ArcError, ArcNotFoundError
+from arc_client.http.async_http import AsyncHTTPClient
+from arc_client.models.retention import (
+    ExecuteRetentionResponse,
+    RetentionExecution,
+    RetentionPolicy,
+)
+
+
+class AsyncRetentionClient:
+    """Asynchronous client for retention policy management."""
+
+    def __init__(self, http: AsyncHTTPClient, config: ClientConfig) -> None:
+        self._http = http
+        self._config = config
+
+    async def create(
+        self,
+        name: str,
+        database: str,
+        retention_days: int,
+        measurement: str | None = None,
+        buffer_days: int = 7,
+        is_active: bool = True,
+    ) -> RetentionPolicy:
+        """Create a new retention policy."""
+        payload = {
+            "name": name,
+            "database": database,
+            "retention_days": retention_days,
+            "measurement": measurement,
+            "buffer_days": buffer_days,
+            "is_active": is_active,
+        }
+        try:
+            response = await self._http.post("/api/v1/retention", json=payload)
+            data = response.json()
+            if not data.get("success", True):
+                raise ArcError(data.get("error", "Failed to create policy"))
+            return RetentionPolicy(**data.get("policy", data))
+        except ArcError:
+            raise
+        except Exception as e:
+            raise ArcError(f"Failed to create retention policy: {e}") from e
+
+    async def list(self) -> list[RetentionPolicy]:
+        """List all retention policies."""
+        try:
+            response = await self._http.get("/api/v1/retention")
+            data = response.json()
+            policies = data.get("policies", [])
+            return [RetentionPolicy(**p) for p in policies]
+        except Exception as e:
+            raise ArcError(f"Failed to list retention policies: {e}") from e
+
+    async def get(self, policy_id: int) -> RetentionPolicy:
+        """Get retention policy details."""
+        try:
+            response = await self._http.get(f"/api/v1/retention/{policy_id}")
+            data = response.json()
+            if not data.get("success", True):
+                error = data.get("error", "Unknown error")
+                if "not found" in error.lower():
+                    raise ArcNotFoundError(f"Policy {policy_id} not found")
+                raise ArcError(error)
+            return RetentionPolicy(**data.get("policy", data))
+        except (ArcNotFoundError, ArcError):
+            raise
+        except Exception as e:
+            raise ArcError(f"Failed to get retention policy: {e}") from e
+
+    async def update(
+        self,
+        policy_id: int,
+        name: str | None = None,
+        retention_days: int | None = None,
+        measurement: str | None = None,
+        buffer_days: int | None = None,
+        is_active: bool | None = None,
+    ) -> RetentionPolicy:
+        """Update a retention policy."""
+        payload: dict = {}
+        if name is not None:
+            payload["name"] = name
+        if retention_days is not None:
+            payload["retention_days"] = retention_days
+        if measurement is not None:
+            payload["measurement"] = measurement
+        if buffer_days is not None:
+            payload["buffer_days"] = buffer_days
+        if is_active is not None:
+            payload["is_active"] = is_active
+
+        try:
+            response = await self._http.put(
+                f"/api/v1/retention/{policy_id}", json=payload
+            )
+            data = response.json()
+            if not data.get("success", True):
+                error = data.get("error", "Unknown error")
+                if "not found" in error.lower():
+                    raise ArcNotFoundError(f"Policy {policy_id} not found")
+                raise ArcError(error)
+            return RetentionPolicy(**data.get("policy", data))
+        except (ArcNotFoundError, ArcError):
+            raise
+        except Exception as e:
+            raise ArcError(f"Failed to update retention policy: {e}") from e
+
+    async def delete(self, policy_id: int) -> None:
+        """Delete a retention policy."""
+        try:
+            response = await self._http.delete(f"/api/v1/retention/{policy_id}")
+            data = response.json()
+            if not data.get("success", True):
+                error = data.get("error", "Unknown error")
+                if "not found" in error.lower():
+                    raise ArcNotFoundError(f"Policy {policy_id} not found")
+                raise ArcError(error)
+        except (ArcNotFoundError, ArcError):
+            raise
+        except Exception as e:
+            raise ArcError(f"Failed to delete retention policy: {e}") from e
+
+    async def execute(
+        self, policy_id: int, dry_run: bool = True, confirm: bool = False
+    ) -> ExecuteRetentionResponse:
+        """Execute a retention policy."""
+        payload = {"dry_run": dry_run, "confirm": confirm}
+        try:
+            response = await self._http.post(
+                f"/api/v1/retention/{policy_id}/execute", json=payload
+            )
+            data = response.json()
+            return ExecuteRetentionResponse(**data)
+        except Exception as e:
+            raise ArcError(f"Failed to execute retention policy: {e}") from e
+
+    async def get_executions(
+        self, policy_id: int, limit: int = 50
+    ) -> list[RetentionExecution]:
+        """Get execution history for a policy."""
+        try:
+            response = await self._http.get(
+                f"/api/v1/retention/{policy_id}/executions",
+                params={"limit": limit},
+            )
+            data = response.json()
+            executions = data.get("executions", [])
+            return [RetentionExecution(**e) for e in executions]
+        except Exception as e:
+            raise ArcError(f"Failed to get retention executions: {e}") from e

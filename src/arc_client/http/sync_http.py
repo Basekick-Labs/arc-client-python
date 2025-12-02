@@ -1,0 +1,136 @@
+"""Synchronous HTTP client for Arc."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+
+from arc_client.config import ClientConfig
+from arc_client.http.base import (
+    HTTPClientBase,
+    handle_connection_error,
+    handle_response_error,
+)
+
+
+class SyncHTTPClient(HTTPClientBase):
+    """Synchronous HTTP client using httpx."""
+
+    def __init__(self, config: ClientConfig) -> None:
+        super().__init__(config)
+        self._client: httpx.Client | None = None
+
+    def _get_client(self) -> httpx.Client:
+        """Get or create the httpx client."""
+        if self._client is None:
+            self._client = httpx.Client(
+                base_url=self._base_url,
+                timeout=self.config.timeout,
+                verify=self.config.verify_ssl,
+            )
+        return self._client
+
+    def close(self) -> None:
+        """Close the HTTP client."""
+        if self._client is not None:
+            self._client.close()
+            self._client = None
+
+    def get(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Make a GET request."""
+        kwargs = self._prepare_request_kwargs(headers=headers, params=params)
+        try:
+            response = self._get_client().get(path, **kwargs)
+            handle_response_error(response)
+            return response
+        except httpx.ConnectError as e:
+            handle_connection_error(e, self._build_url(path))
+            raise  # Never reached, but satisfies type checker
+
+    def post(
+        self,
+        path: str,
+        json: Any | None = None,
+        content: bytes | None = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Make a POST request."""
+        kwargs = self._prepare_request_kwargs(headers=headers, params=params)
+        if json is not None:
+            kwargs["json"] = json
+        if content is not None:
+            kwargs["content"] = content
+        try:
+            response = self._get_client().post(path, **kwargs)
+            handle_response_error(response)
+            return response
+        except httpx.ConnectError as e:
+            handle_connection_error(e, self._build_url(path))
+            raise
+
+    def put(
+        self,
+        path: str,
+        json: Any | None = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Make a PUT request."""
+        kwargs = self._prepare_request_kwargs(headers=headers, params=params)
+        if json is not None:
+            kwargs["json"] = json
+        try:
+            response = self._get_client().put(path, **kwargs)
+            handle_response_error(response)
+            return response
+        except httpx.ConnectError as e:
+            handle_connection_error(e, self._build_url(path))
+            raise
+
+    def patch(
+        self,
+        path: str,
+        json: Any | None = None,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Make a PATCH request."""
+        kwargs = self._prepare_request_kwargs(headers=headers, params=params)
+        if json is not None:
+            kwargs["json"] = json
+        try:
+            response = self._get_client().patch(path, **kwargs)
+            handle_response_error(response)
+            return response
+        except httpx.ConnectError as e:
+            handle_connection_error(e, self._build_url(path))
+            raise
+
+    def delete(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Make a DELETE request."""
+        kwargs = self._prepare_request_kwargs(headers=headers, params=params)
+        try:
+            response = self._get_client().delete(path, **kwargs)
+            handle_response_error(response)
+            return response
+        except httpx.ConnectError as e:
+            handle_connection_error(e, self._build_url(path))
+            raise
+
+    def __enter__(self) -> SyncHTTPClient:
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.close()
