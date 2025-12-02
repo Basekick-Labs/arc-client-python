@@ -1,31 +1,32 @@
-# arc-client
+# arc-tsdb-client
 
 Python SDK for [Arc](https://github.com/basekick-labs/arc) time-series database.
 
+[![PyPI version](https://badge.fury.io/py/arc-tsdb-client.svg)](https://badge.fury.io/py/arc-tsdb-client)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Installation
 
 ```bash
-pip install arc-client
+pip install arc-tsdb-client
 
 # With pandas support
-pip install arc-client[pandas]
+pip install arc-tsdb-client[pandas]
 
 # With polars support
-pip install arc-client[polars]
+pip install arc-tsdb-client[polars]
 
 # With all optional dependencies
-pip install arc-client[all]
+pip install arc-tsdb-client[all]
 ```
 
 Or with uv:
 
 ```bash
-uv add arc-client
-uv add arc-client --extra pandas
-uv add arc-client --extra all
+uv add arc-tsdb-client
+uv add arc-tsdb-client --extra pandas
+uv add arc-tsdb-client --extra all
 ```
 
 ## Quick Start
