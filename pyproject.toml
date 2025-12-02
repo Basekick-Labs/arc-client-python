@@ -3,7 +3,7 @@ requires = ["hatchling>=1.21.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "arc-client"
+name = "arc-tsdb-client"
 version = "0.1.0"
 description = "Python SDK for Arc time-series database"
 readme = "README.md"
