@@ -353,7 +353,7 @@ except ArcConnectionError as e:
 
 ## Documentation
 
-See the [full documentation](https://docs.basekick.net/arc/python-sdk) for detailed guides and API reference.
+See the [full documentation]([https://docs.basekick.net/arc/sdks/python/])) for detailed guides and API reference.
 
 ## License
 
