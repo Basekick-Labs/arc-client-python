@@ -15,7 +15,7 @@ from arc_client.exceptions import (
     ArcValidationError,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.2"
 
 __all__ = [
     # Clients
