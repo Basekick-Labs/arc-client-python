@@ -122,7 +122,11 @@ class AsyncBufferedWriter:
                 await self._flush_measurement_unlocked(measurement)
 
     def _merge_columnar(self, batches: list[dict[str, list[Any]]]) -> dict[str, list[Any]]:
-        """Merge multiple columnar batches into one."""
+        """Merge multiple columnar batches into one.
+
+        When batches have different column sets (sparse columns), missing
+        positions are filled with None so all columns have equal length.
+        """
         if not batches:
             return {}
 
@@ -133,12 +137,17 @@ class AsyncBufferedWriter:
         for batch in batches:
             all_columns.update(batch.keys())
 
+        # Merge each column, padding missing columns with None
         merged: dict[str, list[Any]] = {}
         for col_name in all_columns:
             merged[col_name] = []
             for batch in batches:
                 if col_name in batch:
                     merged[col_name].extend(batch[col_name])
+                else:
+                    # Column missing from this batch — pad with None
+                    batch_len = len(batch.get("time", next(iter(batch.values()))))
+                    merged[col_name].extend([None] * batch_len)
 
         return merged
 
