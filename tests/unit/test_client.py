@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from arc_client import ArcClient, AsyncArcClient, ClientConfig
+from arc_client import ArcClient, AsyncArcClient, ClientConfig, Compression
 
 
 class TestClientConfig:
@@ -18,9 +18,18 @@ class TestClientConfig:
         assert config.token is None
         assert config.database == "default"
         assert config.timeout == 30.0
-        assert config.compression is True
+        assert config.compression is Compression.ZSTD
         assert config.ssl is False
         assert config.verify_ssl is True
+        assert config.max_retries == 3
+
+    def test_compression_coercion(self) -> None:
+        """Compression accepts enum, string, and bool (back-compat)."""
+        assert ClientConfig(compression=True).compression is Compression.GZIP
+        assert ClientConfig(compression=False).compression is Compression.NONE
+        assert ClientConfig(compression="gzip").compression is Compression.GZIP
+        assert ClientConfig(compression="zstd").compression is Compression.ZSTD
+        assert ClientConfig(compression=Compression.NONE).compression is Compression.NONE
 
     def test_base_url_http(self) -> None:
         """Test base URL generation for HTTP."""

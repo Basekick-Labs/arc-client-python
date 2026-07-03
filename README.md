@@ -53,19 +53,27 @@ with ArcClient(host="localhost", token="your-token") as client:
 ## Features
 
 - **High-performance ingestion**: MessagePack columnar format (9M+ records/sec)
-- **Multiple formats**: MessagePack columnar/row, InfluxDB Line Protocol
+- **Multiple formats**: MessagePack columnar/row, InfluxDB Line Protocol, TLE
+- **Compression**: gzip **and zstd** (zstd is the default and recommended codec)
 - **DataFrame integration**: Pandas, Polars, PyArrow
 - **Sync and async APIs**: Full async support with httpx
-- **Buffered writes**: Automatic batching with size and time thresholds
-- **Query support**: SQL queries with JSON or Arrow IPC streaming
+- **Buffered writes**: Automatic batching with a background flush timer
+- **Automatic retries**: Exponential backoff for connection errors, 429, and 503
+- **Query support**: SQL queries with JSON, Arrow IPC streaming, or MessagePack
+- **Bulk import**: CSV, Parquet, line-protocol files, and TLE files
+- **Databases**: List, create, delete databases and list measurements
 - **Management**: Retention policies, continuous queries, delete operations
+- **Enterprise**: RBAC, query governance, audit logs, query management, cluster,
+  compaction, storage tiering, backup/restore, and MQTT ingestion
 - **Authentication**: Token management (create, rotate, revoke)
 
 ## Data Ingestion
 
 ### Columnar Format (Recommended)
 
-The fastest way to write data. Uses MessagePack with gzip compression:
+The fastest way to write data. Uses MessagePack with zstd compression by
+default (the server recommends zstd; gzip and no compression are also supported —
+see [Configuration](#configuration)):
 
 ```python
 client.write.write_columnar(
@@ -134,6 +142,56 @@ lines = [
 client.write.write_line_protocol(lines)
 ```
 
+### TLE (Two-Line Element) Streaming
+
+Stream satellite TLE text; the server parses it into orbital-element fields:
+
+```python
+tle = """ISS (ZARYA)
+1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9994
+2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.49309239432416"""
+
+client.write.write_tle(tle, measurement="satellite_tle")
+```
+
+## Bulk Import
+
+Import files directly (admin token required). Each returns a typed result with
+the number of rows imported. Files may be gzip-compressed for LP/TLE.
+
+```python
+# CSV
+result = client.import_.import_csv("metrics.csv", measurement="cpu",
+                                   time_column="time", time_format="epoch_ms")
+print(result.rows_imported)
+
+# Parquet
+client.import_.import_parquet("data.parquet", measurement="cpu")
+
+# InfluxDB line-protocol file
+client.import_.import_lp("dump.lp", precision="ns")
+
+# TLE file
+client.import_.import_tle("catalog.tle", measurement="satellite_tle")
+```
+
+`import_csv`/`import_parquet`/`import_lp`/`import_tle` accept a path, a binary
+file-like object, or raw `bytes`.
+
+## Databases
+
+```python
+client.databases.create("metrics")
+for db in client.databases.list().databases:
+    print(db.name, db.measurement_count)
+
+info = client.databases.get("metrics")
+measurements = client.databases.list_measurements("metrics")
+
+# Destructive — requires confirm=True and server-side delete enabled
+client.databases.delete("metrics", confirm=True)
+```
+
 ## Querying Data
 
 ### JSON Response
@@ -162,6 +220,21 @@ pl_df = client.query.query_polars("SELECT * FROM default.cpu LIMIT 1000")
 ```python
 table = client.query.query_arrow("SELECT * FROM default.cpu LIMIT 1000")
 ```
+
+### MessagePack Response (experimental)
+
+A compact columnar MessagePack response with native timestamp decoding. Returns
+the same `QueryResponse` shape as `query()` (row-major `data`), plus per-column
+Arrow types in `.types`:
+
+```python
+result = client.query.query_msgpack("SELECT * FROM default.cpu LIMIT 1000")
+print(result.columns, result.types)
+```
+
+> **Experimental.** This uses `/api/v1/query/msgpack`, which requires the Arc
+> server to be built with the `duckdb_arrow` build tag. Against a server without
+> it, the call raises `ArcNotSupportedError` (HTTP 501).
 
 ### Query Estimation
 
@@ -313,20 +386,58 @@ print(f"New token: {rotated.new_token}")
 client.auth.revoke_token(token_id=123)
 ```
 
+## Enterprise Operations
+
+These require an Arc server with the corresponding enterprise license feature.
+Without it, calls raise `ArcLicenseError` (a subclass of `ArcAuthenticationError`).
+Each sub-client is a thin wrapper that returns the server's JSON.
+
+```python
+# RBAC: organizations -> teams -> roles -> measurement permissions
+org = client.rbac.create_organization("acme")
+client.rbac.add_token_to_team(token_id=123, team_id=1)
+
+# Query governance (per-token rate limits & quotas)
+client.governance.create_policy(token_id=123, rate_limit_per_minute=600)
+print(client.governance.usage(123))
+
+# Audit logs
+client.audit.logs(event_type="query", since="2024-01-01T00:00:00Z", limit=100)
+
+# Query management
+client.queries.active()
+client.queries.kill("query-id")
+
+# Cluster / compaction / tiering / backup / MQTT
+client.cluster.status()
+client.compaction.trigger(tier="hourly,daily")
+client.tiering.set_policy("metrics", hot_only=True, hot_max_age_days=7)
+client.backup.create()
+client.mqtt.list_subscriptions()
+```
+
 ## Configuration
 
 ```python
+from arc_client import ArcClient, Compression
+
 client = ArcClient(
-    host="localhost",       # Arc server hostname
-    port=8000,              # Arc server port (default: 8000)
-    token="your-token",     # API token
-    database="default",     # Default database
-    timeout=30.0,           # Request timeout in seconds
-    compression=True,       # Enable gzip compression for writes
-    ssl=False,              # Use HTTPS
-    verify_ssl=True,        # Verify SSL certificates
+    host="localhost",              # Arc server hostname
+    port=8000,                     # Arc server port (default: 8000)
+    token="your-token",            # API token
+    database="default",            # Default database
+    timeout=30.0,                  # Request timeout in seconds
+    compression=Compression.ZSTD,  # "zstd" (default), "gzip", "none", or a bool
+    ssl=False,                     # Use HTTPS
+    verify_ssl=True,               # Verify SSL certificates
+    max_retries=3,                 # Retries for connection errors / 429 / 503
+    retry_backoff=0.5,             # Base backoff (seconds) for exponential retry
 )
 ```
+
+`compression` accepts a `Compression` enum, a string (`"zstd"`/`"gzip"`/`"none"`),
+or a bool for backward compatibility (`True` → gzip, `False` → none). Arc detects
+the codec from the payload's magic bytes, so no `Content-Encoding` header is sent.
 
 ## Error Handling
 
@@ -334,12 +445,14 @@ client = ArcClient(
 from arc_client.exceptions import (
     ArcError,              # Base exception
     ArcConnectionError,    # Connection failures
-    ArcAuthenticationError,# Auth failures (401)
+    ArcAuthenticationError,# Auth failures (401/403)
+    ArcLicenseError,       # Enterprise feature not licensed (403)
     ArcQueryError,         # Query execution errors
     ArcIngestionError,     # Write failures
     ArcValidationError,    # Invalid input
     ArcNotFoundError,      # Resource not found (404)
     ArcRateLimitError,     # Rate limited (429)
+    ArcNotSupportedError,  # Operation unsupported by server (501)
     ArcServerError,        # Server errors (5xx)
 )
 

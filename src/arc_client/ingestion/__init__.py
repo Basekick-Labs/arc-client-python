@@ -9,7 +9,16 @@ This module provides high-performance data ingestion for Arc using:
 from arc_client.ingestion.async_buffered import AsyncBufferedWriter
 from arc_client.ingestion.async_writer import AsyncWriteClient
 from arc_client.ingestion.buffered import BufferedWriter
-from arc_client.ingestion.compression import compress_gzip, decompress_gzip, is_gzipped
+from arc_client.ingestion.compression import (
+    Compression,
+    compress,
+    compress_gzip,
+    compress_zstd,
+    decompress_gzip,
+    decompress_zstd,
+    is_gzipped,
+    is_zstd,
+)
 from arc_client.ingestion.line_protocol import (
     format_columnar_as_lines,
     format_line_protocol,
@@ -41,7 +50,12 @@ __all__ = [
     "format_lines",
     "format_columnar_as_lines",
     # Compression
+    "Compression",
+    "compress",
     "compress_gzip",
+    "compress_zstd",
     "decompress_gzip",
+    "decompress_zstd",
     "is_gzipped",
+    "is_zstd",
 ]

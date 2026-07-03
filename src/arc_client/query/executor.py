@@ -8,9 +8,11 @@ import pyarrow as pa
 import pyarrow.ipc as ipc
 
 from arc_client.config import ClientConfig
-from arc_client.exceptions import ArcQueryError, ArcValidationError
+from arc_client.exceptions import ArcNotSupportedError, ArcQueryError, ArcValidationError
 from arc_client.http.sync_http import SyncHTTPClient
 from arc_client.models.query import EstimateResponse, MeasurementInfo, QueryResponse
+from arc_client.query.msgpack_response import decode_msgpack_query_response
+from arc_client.validation import validate_name
 
 if TYPE_CHECKING:
     pass
@@ -83,6 +85,49 @@ class QueryClient:
             return QueryResponse(**data)
 
         except ArcQueryError:
+            raise
+        except Exception as e:
+            raise ArcQueryError(f"Query failed: {e}") from e
+
+    def query_msgpack(self, sql: str, database: Optional[str] = None) -> QueryResponse:
+        """Execute a SQL query and decode the MessagePack response.
+
+        **Experimental.** This uses Arc's ``/api/v1/query/msgpack`` endpoint,
+        which returns a compact columnar MessagePack envelope with native
+        timestamp encoding. The result is transposed to row-major and returned
+        as a :class:`QueryResponse` (same shape as :meth:`query`), with the
+        per-column Arrow types available in ``QueryResponse.types``.
+
+        The endpoint requires the Arc server to be built with the
+        ``duckdb_arrow`` build tag; otherwise the server responds with HTTP 501.
+
+        Args:
+            sql: SQL query to execute.
+            database: Target database. Uses client default if not specified.
+
+        Returns:
+            QueryResponse with row-major ``data`` and populated ``types``.
+
+        Raises:
+            ArcValidationError: If the SQL is empty.
+            ArcNotSupportedError: If the server lacks msgpack query support (501).
+            ArcQueryError: If the query fails.
+        """
+        if not sql or not sql.strip():
+            raise ArcValidationError("SQL query cannot be empty")
+
+        headers = {"Accept": "application/msgpack"}
+        if database:
+            headers["x-arc-database"] = database
+
+        try:
+            response = self._http.post(
+                "/api/v1/query/msgpack",
+                json={"sql": sql},
+                headers=headers,
+            )
+            return decode_msgpack_query_response(response.content)
+        except (ArcQueryError, ArcNotSupportedError, ArcValidationError):
             raise
         except Exception as e:
             raise ArcQueryError(f"Query failed: {e}") from e
@@ -332,5 +377,5 @@ class QueryClient:
             >>> for row in result.data:
             ...     print(row)
         """
-        db = database or "default"
+        db = validate_name(database or "default", "database")
         return self.query(f"SHOW TABLES FROM {db}")

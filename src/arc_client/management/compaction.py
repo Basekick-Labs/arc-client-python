@@ -1,0 +1,61 @@
+"""Synchronous compaction-management client for Arc.
+
+Wraps ``/api/v1/compaction``. Reads are available to any valid token; ``trigger``
+requires an admin token.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Optional
+
+from arc_client.config import ClientConfig
+from arc_client.exceptions import ArcError
+from arc_client.http.sync_http import SyncHTTPClient
+
+
+class CompactionClient:
+    """Inspect and trigger compaction."""
+
+    def __init__(self, http: SyncHTTPClient, config: ClientConfig) -> None:
+        self._http = http
+        self._config = config
+
+    def _json(self, method: str, path: str, **kwargs: Any) -> Any:
+        try:
+            response = getattr(self._http, method)(path, **kwargs)
+            return response.json()
+        except ArcError:
+            raise
+        except Exception as e:
+            raise ArcError(f"Compaction request failed ({method.upper()} {path}): {e}") from e
+
+    def status(self) -> Any:
+        """Get compaction manager and scheduler status."""
+        return self._json("get", "/api/v1/compaction/status")
+
+    def stats(self) -> Any:
+        """Get raw compaction statistics."""
+        return self._json("get", "/api/v1/compaction/stats")
+
+    def candidates(self) -> Any:
+        """List partitions that are candidates for compaction."""
+        return self._json("get", "/api/v1/compaction/candidates")
+
+    def jobs(self) -> Any:
+        """List active compaction jobs."""
+        return self._json("get", "/api/v1/compaction/jobs")
+
+    def history(self, limit: Optional[int] = None) -> Any:
+        """Get recent compaction jobs (default 10)."""
+        params = {"limit": limit} if limit is not None else None
+        return self._json("get", "/api/v1/compaction/history", params=params)
+
+    def trigger(self, tier: Optional[str] = None, database: Optional[str] = None) -> Any:
+        """Trigger a compaction cycle (admin).
+
+        Args:
+            tier: Comma-separated tiers (e.g. "hourly,daily"). Default all enabled.
+            database: Restrict to a single database.
+        """
+        params = {k: v for k, v in {"tier": tier, "database": database}.items() if v}
+        return self._json("post", "/api/v1/compaction/trigger", params=params or None)

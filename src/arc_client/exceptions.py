@@ -59,3 +59,23 @@ class ArcServerError(ArcError):
     def __init__(self, message: str, status_code: Optional[int] = None) -> None:
         super().__init__(message)
         self.status_code = status_code
+
+
+class ArcNotSupportedError(ArcError):
+    """The server does not support the requested operation.
+
+    Raised, for example, when calling ``query_msgpack`` against an Arc server
+    that was not built with the ``duckdb_arrow`` build tag (HTTP 501).
+    """
+
+    pass
+
+
+class ArcLicenseError(ArcAuthenticationError):
+    """The requested feature requires an enterprise license.
+
+    Subclasses :class:`ArcAuthenticationError` so existing ``except`` blocks
+    that catch permission failures keep working.
+    """
+
+    pass

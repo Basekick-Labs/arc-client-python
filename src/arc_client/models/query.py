@@ -27,6 +27,9 @@ class QueryResponse(BaseModel):
     execution_time_ms: float = 0.0
     timestamp: Optional[str] = None
     error: Optional[str] = None
+    # Populated only by the msgpack query path (``query_msgpack``); the JSON
+    # path leaves it empty. Parallel to ``columns``: Arrow type name per column.
+    types: list[str] = Field(default_factory=list)
 
 
 class EstimateResponse(BaseModel):

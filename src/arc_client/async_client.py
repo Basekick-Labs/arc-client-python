@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from arc_client.compression import Compression
 from arc_client.config import ClientConfig
 from arc_client.http.async_http import AsyncHTTPClient
 from arc_client.models.common import HealthResponse
@@ -36,9 +37,11 @@ class AsyncArcClient:
         token: Optional[str] = None,
         database: str = "default",
         timeout: float = 30.0,
-        compression: bool = True,
+        compression: Compression | str | bool = Compression.ZSTD,
         ssl: bool = False,
         verify_ssl: bool = True,
+        max_retries: int = 3,
+        retry_backoff: float = 0.5,
     ) -> None:
         """Initialize the async Arc client.
 
@@ -48,9 +51,13 @@ class AsyncArcClient:
             token: API token for authentication.
             database: Default database name.
             timeout: Request timeout in seconds.
-            compression: Enable gzip compression for writes.
+            compression: Write compression codec (none/gzip/zstd, or bool for
+                back-compat). Defaults to zstd.
             ssl: Use HTTPS.
             verify_ssl: Verify SSL certificates.
+            max_retries: Max automatic retries for transient failures
+                (connection errors, 429, 503). 0 disables retries.
+            retry_backoff: Base backoff (seconds) for exponential retry.
         """
         self._config = ClientConfig(
             host=host,
@@ -61,6 +68,8 @@ class AsyncArcClient:
             compression=compression,
             ssl=ssl,
             verify_ssl=verify_ssl,
+            max_retries=max_retries,
+            retry_backoff=retry_backoff,
         )
         self._http: Optional[AsyncHTTPClient] = None
 
@@ -71,6 +80,17 @@ class AsyncArcClient:
         self._retention: Any = None
         self._continuous_queries: Any = None
         self._delete: Any = None
+        self._import: Any = None
+        self._databases: Any = None
+        self._rbac: Any = None
+        self._governance: Any = None
+        self._audit: Any = None
+        self._queries: Any = None
+        self._cluster: Any = None
+        self._compaction: Any = None
+        self._tiering: Any = None
+        self._backup: Any = None
+        self._mqtt: Any = None
 
     def _get_http(self) -> AsyncHTTPClient:
         """Get or create the HTTP client."""
@@ -136,6 +156,107 @@ class AsyncArcClient:
 
             self._delete = AsyncDeleteClient(self._get_http(), self._config)
         return self._delete
+
+    @property
+    def import_(self) -> Any:
+        """Get the async bulk import client (CSV, Parquet, line protocol, TLE)."""
+        if self._import is None:
+            from arc_client.ingestion.async_importer import AsyncImportClient
+
+            self._import = AsyncImportClient(self._get_http(), self._config)
+        return self._import
+
+    @property
+    def databases(self) -> Any:
+        """Get the async databases management client."""
+        if self._databases is None:
+            from arc_client.management.async_databases import AsyncDatabaseClient
+
+            self._databases = AsyncDatabaseClient(self._get_http(), self._config)
+        return self._databases
+
+    @property
+    def rbac(self) -> Any:
+        """Get the async RBAC management client (enterprise)."""
+        if self._rbac is None:
+            from arc_client.management.async_rbac import AsyncRBACClient
+
+            self._rbac = AsyncRBACClient(self._get_http(), self._config)
+        return self._rbac
+
+    @property
+    def governance(self) -> Any:
+        """Get the async query governance client (enterprise)."""
+        if self._governance is None:
+            from arc_client.management.async_governance import AsyncGovernanceClient
+
+            self._governance = AsyncGovernanceClient(self._get_http(), self._config)
+        return self._governance
+
+    @property
+    def audit(self) -> Any:
+        """Get the async audit log client (enterprise)."""
+        if self._audit is None:
+            from arc_client.management.async_audit import AsyncAuditClient
+
+            self._audit = AsyncAuditClient(self._get_http(), self._config)
+        return self._audit
+
+    @property
+    def queries(self) -> Any:
+        """Get the async query management client (active/history/kill)."""
+        if self._queries is None:
+            from arc_client.management.async_query_management import (
+                AsyncQueryManagementClient,
+            )
+
+            self._queries = AsyncQueryManagementClient(self._get_http(), self._config)
+        return self._queries
+
+    @property
+    def cluster(self) -> Any:
+        """Get the async cluster management client (enterprise)."""
+        if self._cluster is None:
+            from arc_client.management.async_cluster import AsyncClusterClient
+
+            self._cluster = AsyncClusterClient(self._get_http(), self._config)
+        return self._cluster
+
+    @property
+    def compaction(self) -> Any:
+        """Get the async compaction management client (enterprise)."""
+        if self._compaction is None:
+            from arc_client.management.async_compaction import AsyncCompactionClient
+
+            self._compaction = AsyncCompactionClient(self._get_http(), self._config)
+        return self._compaction
+
+    @property
+    def tiering(self) -> Any:
+        """Get the async storage tiering client (enterprise)."""
+        if self._tiering is None:
+            from arc_client.management.async_tiering import AsyncTieringClient
+
+            self._tiering = AsyncTieringClient(self._get_http(), self._config)
+        return self._tiering
+
+    @property
+    def backup(self) -> Any:
+        """Get the async backup/restore client (enterprise)."""
+        if self._backup is None:
+            from arc_client.management.async_backup import AsyncBackupClient
+
+            self._backup = AsyncBackupClient(self._get_http(), self._config)
+        return self._backup
+
+    @property
+    def mqtt(self) -> Any:
+        """Get the async MQTT ingestion management client (enterprise)."""
+        if self._mqtt is None:
+            from arc_client.management.async_mqtt import AsyncMQTTClient
+
+            self._mqtt = AsyncMQTTClient(self._get_http(), self._config)
+        return self._mqtt
 
     async def health(self) -> HealthResponse:
         """Check server health.
