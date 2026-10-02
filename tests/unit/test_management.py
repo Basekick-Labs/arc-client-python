@@ -399,3 +399,143 @@ class TestAsyncDeleteClientValidation:
 
         with pytest.raises(ArcValidationError, match="where clause is required"):
             await client.delete("default", "cpu", "")
+
+
+class _StubResponse:
+    """Minimal stand-in for the HTTP response the clients unwrap."""
+
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+
+    def json(self) -> dict:
+        return self._payload
+
+
+class _StubHTTP:
+    """Records the PUT body so the update contract can be asserted."""
+
+    def __init__(self, stored: dict, listing: object | None = None) -> None:
+        self.stored = stored
+        self.listing = [stored] if listing is None else listing
+        self.put_body: dict | None = None
+
+    def get(self, path: str, params: dict | None = None) -> _StubResponse:
+        if path.endswith("/continuous_queries"):
+            return _StubResponse(self.listing)
+        return _StubResponse(self.stored)
+
+    def put(self, path: str, json: dict) -> _StubResponse:
+        self.put_body = json
+        return _StubResponse({**self.stored, **json})
+
+
+class TestContinuousQueryUpdate:
+    """PUT replaces the whole definition server side, so update must send one.
+
+    Arc requires name, database, source_measurement, destination_measurement,
+    query and interval in the body (Basekick-Labs/arc#993, #1011) and
+    overwrites the rest with whatever it carries, so a sparse body either 400s
+    or silently blanks stored columns.
+    """
+
+    STORED = {
+        "id": 7,
+        "name": "downsample-cpu",
+        "description": "hourly rollup",
+        "database": "default",
+        "source_measurement": "cpu",
+        "destination_measurement": "cpu_1h",
+        "query": (
+            "SELECT avg(usage) FROM default.cpu WHERE time >= {start_time} AND time < {end_time}"
+        ),
+        "interval": "1h",
+        "tag_columns": ["host"],
+        "retention_days": 365,
+        "delete_source_after_days": 7,
+        "is_active": True,
+    }
+
+    def _client(self) -> tuple:
+        from arc_client.management.continuous_query import ContinuousQueryClient
+
+        http = _StubHTTP(dict(self.STORED))
+        return ContinuousQueryClient(http, None), http  # type: ignore[arg-type]
+
+    def test_update_sends_every_required_field(self) -> None:
+        """A one-field change still carries the whole definition."""
+        client, http = self._client()
+        client.update(7, is_active=False)
+
+        assert http.put_body is not None
+        for field in (
+            "name",
+            "database",
+            "source_measurement",
+            "destination_measurement",
+            "query",
+            "interval",
+        ):
+            assert http.put_body[field] == self.STORED[field], field
+
+    def test_update_preserves_the_fields_arc_overwrites_unconditionally(self) -> None:
+        """Omitting these would zero them, and is_active would stop the CQ."""
+        client, http = self._client()
+        client.update(7, interval="30m")
+
+        assert http.put_body is not None
+        assert http.put_body["interval"] == "30m"
+        assert http.put_body["description"] == "hourly rollup"
+        assert http.put_body["tag_columns"] == ["host"]
+        assert http.put_body["retention_days"] == 365
+        assert http.put_body["delete_source_after_days"] == 7
+        assert http.put_body["is_active"] is True
+
+    def test_update_applies_only_what_it_is_given(self) -> None:
+        """Every other field keeps its stored value."""
+        client, http = self._client()
+        client.update(7, destination_measurement="cpu_5m", tag_columns=["host", "region"])
+
+        assert http.put_body is not None
+        assert http.put_body["destination_measurement"] == "cpu_5m"
+        assert http.put_body["tag_columns"] == ["host", "region"]
+        assert http.put_body["source_measurement"] == "cpu"
+        assert http.put_body["name"] == "downsample-cpu"
+
+    def test_from_response_reads_the_flat_body_arc_returns(self) -> None:
+        """create, get and update all unwrap the same body.
+
+        Arc answers with the definition flat, and a flat body carries a
+        ``query`` key holding SQL -- so unwrapping ``data["query"]``
+        unconditionally passed a string where a mapping belongs and raised
+        TypeError on every one of those three calls.
+        """
+        cq = ContinuousQuery.from_response(dict(self.STORED))
+
+        assert cq.id == 7
+        assert cq.query.startswith("SELECT avg(usage)")
+        assert cq.tag_columns == ["host"]
+
+    def test_from_response_still_accepts_a_nested_body(self) -> None:
+        """A body that really does nest the definition keeps working."""
+        cq = ContinuousQuery.from_response({"success": True, "query": dict(self.STORED)})
+
+        assert cq.id == 7
+        assert cq.destination_measurement == "cpu_1h"
+
+    def test_list_reads_the_bare_array_arc_returns(self) -> None:
+        """GET /api/v1/continuous_queries answers with an array, not an envelope."""
+        client, _ = self._client()
+
+        queries = client.list()
+
+        assert [q.id for q in queries] == [7]
+        assert queries[0].destination_measurement == "cpu_1h"
+
+    def test_list_still_accepts_an_envelope(self) -> None:
+        """A body that wraps the array in "queries" keeps working."""
+        from arc_client.management.continuous_query import ContinuousQueryClient
+
+        http = _StubHTTP(dict(self.STORED), listing={"queries": [dict(self.STORED)]})
+        client = ContinuousQueryClient(http, None)  # type: ignore[arg-type]
+
+        assert [q.id for q in client.list()] == [7]

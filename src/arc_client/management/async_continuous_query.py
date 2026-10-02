@@ -53,7 +53,7 @@ class AsyncContinuousQueryClient:
             data = response.json()
             if not data.get("success", True):
                 raise ArcError(data.get("error", "Failed to create CQ"))
-            return ContinuousQuery(**data.get("query", data))
+            return ContinuousQuery.from_response(data)
         except ArcError:
             raise
         except Exception as e:
@@ -72,7 +72,9 @@ class AsyncContinuousQueryClient:
 
             response = await self._http.get("/api/v1/continuous_queries", params=params)
             data = response.json()
-            queries = data.get("queries", [])
+            # Arc answers this one with a bare array; the envelope form is
+            # tolerated so a body that grows one keeps working.
+            queries = data if isinstance(data, list) else data.get("queries", [])
             return [ContinuousQuery(**q) for q in queries]
         except Exception as e:
             raise ArcError(f"Failed to list continuous queries: {e}") from e
@@ -87,7 +89,7 @@ class AsyncContinuousQueryClient:
                 if "not found" in error.lower():
                     raise ArcNotFoundError(f"CQ {query_id} not found")
                 raise ArcError(error)
-            return ContinuousQuery(**data.get("query", data))
+            return ContinuousQuery.from_response(data)
         except (ArcNotFoundError, ArcError):
             raise
         except Exception as e:
@@ -98,28 +100,50 @@ class AsyncContinuousQueryClient:
         query_id: int,
         name: Optional[str] = None,
         description: Optional[str] = None,
+        database: Optional[str] = None,
+        source_measurement: Optional[str] = None,
+        destination_measurement: Optional[str] = None,
         query: Optional[str] = None,
         interval: Optional[str] = None,
+        tag_columns: Optional[List[str]] = None,
         retention_days: Optional[int] = None,
         delete_source_after_days: Optional[int] = None,
         is_active: Optional[bool] = None,
     ) -> ContinuousQuery:
-        """Update a continuous query."""
-        payload: dict[str, Any] = {}
-        if name is not None:
-            payload["name"] = name
-        if description is not None:
-            payload["description"] = description
-        if query is not None:
-            payload["query"] = query
-        if interval is not None:
-            payload["interval"] = interval
-        if retention_days is not None:
-            payload["retention_days"] = retention_days
-        if delete_source_after_days is not None:
-            payload["delete_source_after_days"] = delete_source_after_days
-        if is_active is not None:
-            payload["is_active"] = is_active
+        """Update a continuous query.
+
+        Server side, ``PUT`` replaces the whole definition: every column is
+        written from the body, so a field the body leaves out is stored blank
+        or zeroed. Arc requires ``name``, ``database``, ``source_measurement``,
+        ``destination_measurement``, ``query`` and ``interval`` in the body
+        (Basekick-Labs/arc#993, #1011), and overwrites ``description``,
+        ``tag_columns``, ``retention_days``, ``delete_source_after_days`` and
+        ``is_active`` with whatever it carries -- omitting ``is_active`` stops
+        the continuous query.
+
+        So this reads the current definition and sends it back with the
+        arguments given here applied: pass only what you want to change. A
+        value of ``None`` means "leave as it is", which is why there is no way
+        to clear ``description`` through this method.
+        """
+        current = await self.get(query_id)
+        changes: dict[str, Any] = {
+            "name": name,
+            "description": description,
+            "database": database,
+            "source_measurement": source_measurement,
+            "destination_measurement": destination_measurement,
+            "query": query,
+            "interval": interval,
+            "tag_columns": tag_columns,
+            "retention_days": retention_days,
+            "delete_source_after_days": delete_source_after_days,
+            "is_active": is_active,
+        }
+        payload: dict[str, Any] = {
+            field: getattr(current, field) if value is None else value
+            for field, value in changes.items()
+        }
 
         try:
             response = await self._http.put(f"/api/v1/continuous_queries/{query_id}", json=payload)
@@ -129,7 +153,7 @@ class AsyncContinuousQueryClient:
                 if "not found" in error.lower():
                     raise ArcNotFoundError(f"CQ {query_id} not found")
                 raise ArcError(error)
-            return ContinuousQuery(**data.get("query", data))
+            return ContinuousQuery.from_response(data)
         except (ArcNotFoundError, ArcError):
             raise
         except Exception as e:

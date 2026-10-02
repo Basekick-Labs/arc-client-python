@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel
 
@@ -18,6 +18,7 @@ class ContinuousQuery(BaseModel):
     destination_measurement: str
     query: str
     interval: str
+    tag_columns: Optional[List[str]] = None
     retention_days: Optional[int] = None
     delete_source_after_days: Optional[int] = None
     is_active: bool = True
@@ -27,6 +28,21 @@ class ContinuousQuery(BaseModel):
     last_records_written: Optional[int] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+    @classmethod
+    def from_response(cls, data: dict[str, Any]) -> ContinuousQuery:
+        """Build a definition from a create, get or update response body.
+
+        Arc returns the definition flat, and the flat body has a ``query`` key
+        holding SQL -- so unwrapping ``data["query"]`` unconditionally passes a
+        string where a mapping belongs and every one of those three calls fails
+        with a TypeError. Only treat ``query`` as the envelope when it actually
+        carries a mapping.
+        """
+        nested = data.get("query")
+        if isinstance(nested, dict):
+            return cls(**nested)
+        return cls(**data)
 
 
 class ExecuteCQResponse(BaseModel):
