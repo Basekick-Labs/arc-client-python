@@ -5,7 +5,7 @@ All notable changes to `arc-tsdb-client` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-07-03
+## [0.2.0] - Unreleased
 
 A large feature-parity release bringing the SDK up to date with the Arc server,
 plus bug fixes and the first real HTTP-layer test coverage.
@@ -28,9 +28,10 @@ plus bug fixes and the first real HTTP-layer test coverage.
   `mqtt`.
 - **zstd write compression** (now the default; gzip and none still supported).
   Compression is configurable via a `Compression` enum, a string, or a bool.
-- **Automatic retries** with exponential backoff + jitter for connection errors,
-  429 (honoring `Retry-After`), and 503. Configurable via `max_retries` /
-  `retry_backoff`.
+- **Automatic retries** with exponential backoff + jitter for read-only
+  connection/transport failures, 429 (honoring `Retry-After`) and 503. Mutations
+  retry only connection establishment; data DELETE never retries. Configure
+  via `max_retries` / `retry_backoff`.
 - New exceptions: `ArcNotSupportedError` (501) and `ArcLicenseError` (403 for a
   missing enterprise-license feature; subclass of `ArcAuthenticationError`).
 - `ArcPermissionError` (403: the token lacks the permission the endpoint
@@ -64,6 +65,9 @@ plus bug fixes and the first real HTTP-layer test coverage.
   while a token with no read permission raises `ArcPermissionError`.
 
 ### Fixed
+
+- Buffered close waits for active writes, retains unacknowledged batches and
+  surfaces failures without replay. Typed errors retain structured diagnostics.
 
 - Polars datetime → columnar conversion used a fragile private attribute that
   raised at runtime; it now casts via the public `polars` API and normalizes the

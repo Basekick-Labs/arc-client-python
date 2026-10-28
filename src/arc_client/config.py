@@ -27,8 +27,8 @@ class ClientConfig(BaseModel):
     max_retries: int = Field(
         default=3,
         ge=0,
-        description="Max automatic retries for transient failures "
-        "(connection errors, 429, 503). 0 disables retries.",
+        description="Max retries for read-only transient failures or mutation connection "
+        "establishment failures. Data DELETE never retries. 0 disables retries.",
     )
     retry_backoff: float = Field(
         default=0.5,
