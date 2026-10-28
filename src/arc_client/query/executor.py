@@ -94,7 +94,9 @@ class QueryClient:
 
         **Experimental.** This uses Arc's ``/api/v1/query/msgpack`` endpoint,
         which returns a compact columnar MessagePack envelope with native
-        timestamp encoding. The result is transposed to row-major and returned
+        timestamp encoding without silently discarding nanoseconds. Exactly representable
+        microseconds become UTC datetime; other values remain msgpack.Timestamp.
+        The result is transposed to row-major and returned
         as a :class:`QueryResponse` (same shape as :meth:`query`), with the
         per-column Arrow types available in ``QueryResponse.types``.
 
