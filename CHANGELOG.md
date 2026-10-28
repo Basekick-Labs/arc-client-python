@@ -12,6 +12,15 @@ plus bug fixes and the first real HTTP-layer test coverage.
 
 ### Added
 
+- Arrow completion metadata in the existing `pyarrow.Table` schema for sync and
+  async queries: policy cap and execution time are retained; failed, malformed,
+  conflicting or unobservable announced completion metadata is rejected.
+  Native column types and unrelated schema metadata remain intact. Trailer
+  capture uses explicitly bounded HTTPX/httpcore/h11 compatibility versions.
+  Promoted timing headers cannot prove uncapped completion when final trailers
+  are missing.
+
+
 - **MessagePack query** (`query.query_msgpack`, experimental): decodes the
   columnar MessagePack response with native timestamp handling and returns the
   same `QueryResponse` shape as `query()` (with per-column Arrow `types`). Raises

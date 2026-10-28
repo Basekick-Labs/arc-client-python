@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Optional
 
 import pyarrow as pa
-import pyarrow.ipc as ipc
 
 from arc_client.config import ClientConfig
 from arc_client.exceptions import ArcNotSupportedError, ArcQueryError, ArcValidationError
 from arc_client.http.sync_http import SyncHTTPClient
 from arc_client.models.query import EstimateResponse, MeasurementInfo, QueryResponse
+from arc_client.query.arrow_response import decode_arrow_response
 from arc_client.query.msgpack_response import decode_msgpack_query_response
 from arc_client.validation import validate_name
 
@@ -211,7 +211,9 @@ class QueryClient:
             database: Target database. Uses client default if not specified.
 
         Returns:
-            pyarrow.Table with query results.
+            pyarrow.Table with query results and completion metadata in
+            its schema: arc.rows_capped, arc.row_cap, arc.execution_time_ms.
+            Missing cap metadata means unknown. Truncation raises ArcQueryError.
 
         Raises:
             ArcQueryError: If the query fails.
@@ -238,15 +240,7 @@ class QueryClient:
                 headers=headers,
             )
 
-            # Check if we got JSON error response instead of Arrow
-            content_type = response.headers.get("content-type", "")
-            if "application/json" in content_type:
-                error_data = response.json()
-                raise ArcQueryError(error_data.get("error", "Query failed with unknown error"))
-
-            # Parse Arrow IPC stream
-            reader = ipc.open_stream(response.content)
-            return reader.read_all()
+            return decode_arrow_response(response)
 
         except ArcQueryError:
             raise

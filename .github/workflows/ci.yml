@@ -134,3 +134,20 @@ jobs:
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
+
+  arrow-httpx-027:
+    name: Arrow transport (HTTPX 0.27)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - run: uv python install 3.11
+      - run: uv sync --extra dev --extra all
+      - name: Install compatible legacy transport test dependencies
+        run: uv pip install --no-deps httpx==0.27.2 pytest-httpx==0.30.0 sniffio==1.3.1
+      - name: Verify real HTTPX 0.27 wire compatibility
+        run: |
+          uv run --no-sync python -c "import httpx; print(httpx.__version__)"
+          uv run --no-sync pytest tests/unit/http/test_arrow_metadata.py --no-cov -v --tb=short

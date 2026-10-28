@@ -8,6 +8,7 @@ from typing import Any, Optional
 import httpx
 
 from arc_client.config import ClientConfig
+from arc_client.http.arrow_trailers import capture_async_arrow_trailers
 from arc_client.http.base import (
     RETRYABLE_TRANSPORT_ERRORS,
     HTTPClientBase,
@@ -33,6 +34,7 @@ class AsyncHTTPClient(HTTPClientBase):
                 base_url=self._base_url,
                 timeout=self.config.timeout,
                 verify=self.config.verify_ssl,
+                event_hooks={"response": [capture_async_arrow_trailers]},
             )
         return self._client
 
