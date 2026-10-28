@@ -5,6 +5,7 @@
 # failure during package initialization.
 __version__ = "0.2.0"
 
+from arc_client._sentinels import CLEAR
 from arc_client.async_client import AsyncArcClient
 from arc_client.client import ArcClient
 from arc_client.compression import Compression
@@ -27,6 +28,7 @@ from arc_client.exceptions import (
 )
 
 __all__ = [
+    "CLEAR",
     # Clients
     "ArcClient",
     "AsyncArcClient",

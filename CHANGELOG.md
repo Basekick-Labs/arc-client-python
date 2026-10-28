@@ -66,6 +66,9 @@ plus bug fixes and the first real HTTP-layer test coverage.
 
 ### Fixed
 
+- Retention and continuous-query clients accept Arc's list/null/flat response
+  shapes. Sparse updates remain sparse; explicit full replacements support
+  released servers, and CLEAR requests explicit null values on newer servers.
 - Buffered close waits for active writes, retains unacknowledged batches and
   surfaces failures without replay. Typed errors retain structured diagnostics.
 
