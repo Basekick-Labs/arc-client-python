@@ -59,6 +59,11 @@ class BufferedWriter:
         self._lock = threading.Lock()
         self._closed = False
 
+        # Background timer that flushes on flush_interval even when no writes
+        # arrive. Started on __enter__ and torn down on close().
+        self._stop_event = threading.Event()
+        self._flush_thread: threading.Thread | None = None
+
     def write(self, record: dict[str, Any]) -> None:
         """Write a single record to the buffer.
 
@@ -138,6 +143,28 @@ class BufferedWriter:
         with self._lock:
             self._flush_all()
 
+    def _start_flush_thread(self) -> None:
+        """Start the background flush timer (idempotent)."""
+        if self._flush_thread is not None or self._flush_interval <= 0:
+            return
+        self._stop_event.clear()
+        self._flush_thread = threading.Thread(
+            target=self._flush_loop, name="arc-buffered-flush", daemon=True
+        )
+        self._flush_thread.start()
+
+    def _flush_loop(self) -> None:
+        """Periodically flush measurements whose data has aged past the interval."""
+        while not self._stop_event.wait(self._flush_interval):
+            with self._lock:
+                if self._closed:
+                    return
+                if (
+                    self._buffers
+                    and time.monotonic() - self._last_flush_time >= self._flush_interval
+                ):
+                    self._flush_all()
+
     def _flush_measurement(self, measurement: str) -> None:
         """Flush a single measurement's buffer. Must hold lock."""
         if measurement not in self._buffers or not self._buffers[measurement]:
@@ -202,12 +229,20 @@ class BufferedWriter:
         if self._closed:
             return
 
+        # Stop the timer thread first so it can't race the final flush.
+        self._stop_event.set()
+        thread = self._flush_thread
+        if thread is not None:
+            thread.join(timeout=self._flush_interval + 1.0)
+            self._flush_thread = None
+
         with self._lock:
             self._flush_all()
             self._closed = True
 
     def __enter__(self) -> BufferedWriter:
         """Enter context manager."""
+        self._start_flush_thread()
         return self
 
     def __exit__(self, *args: Any) -> None:

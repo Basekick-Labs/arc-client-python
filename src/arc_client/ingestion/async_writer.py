@@ -2,18 +2,23 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
+from arc_client.compression import Compression
 from arc_client.config import ClientConfig
 from arc_client.exceptions import ArcIngestionError, ArcValidationError
 from arc_client.http.async_http import AsyncHTTPClient
-from arc_client.ingestion.compression import compress_gzip
+from arc_client.ingestion.compression import compress as compress_data
 from arc_client.ingestion.line_protocol import format_line_protocol
 from arc_client.ingestion.msgpack import (
     dataframe_to_columnar,
     encode_columnar,
     encode_records,
 )
+
+# Compression argument accepted by write methods: a codec, its name, a bool
+# (back-compat), or None to use the client default.
+CompressArg = Optional[Union[Compression, str, bool]]
 
 if TYPE_CHECKING:
     from arc_client.ingestion.async_buffered import AsyncBufferedWriter
@@ -47,7 +52,7 @@ class AsyncWriteClient:
         measurement: str,
         columns: dict[str, list[Any]],
         database: Optional[str] = None,
-        compress: Optional[bool] = None,
+        compress: CompressArg = None,
         time_unit: str = "us",
     ) -> None:
         """Write columnar data to Arc (highest performance method).
@@ -72,7 +77,7 @@ class AsyncWriteClient:
         self,
         records: list[dict[str, Any]],
         database: Optional[str] = None,
-        compress: Optional[bool] = None,
+        compress: CompressArg = None,
     ) -> None:
         """Write records to Arc using MessagePack row format."""
         try:
@@ -91,7 +96,7 @@ class AsyncWriteClient:
         database: Optional[str] = None,
         time_column: str = "time",
         tag_columns: Optional[list[str]] = None,
-        compress: Optional[bool] = None,
+        compress: CompressArg = None,
     ) -> None:
         """Write a DataFrame to Arc."""
         try:
@@ -107,7 +112,7 @@ class AsyncWriteClient:
         self,
         lines: str | list[str],
         database: Optional[str] = None,
-        compress: Optional[bool] = None,
+        compress: CompressArg = None,
     ) -> None:
         """Write data using InfluxDB Line Protocol format."""
         data = "\n".join(lines) if isinstance(lines, list) else lines
@@ -120,11 +125,42 @@ class AsyncWriteClient:
         tags: Optional[dict[str, str]] = None,
         timestamp: Optional[int] = None,
         database: Optional[str] = None,
-        compress: Optional[bool] = None,
+        compress: CompressArg = None,
     ) -> None:
         """Write a single data point using Line Protocol."""
         line = format_line_protocol(measurement, fields, tags, timestamp)
         await self._write_line_protocol(line.encode("utf-8"), database, compress)
+
+    async def write_tle(
+        self,
+        tle_text: str | bytes,
+        measurement: str = "satellite_tle",
+        database: Optional[str] = None,
+        compress: CompressArg = None,
+    ) -> None:
+        """Stream raw TLE (Two-Line Element) text to Arc.
+
+        See WriteClient.write_tle for details. For large files prefer
+        ``client.import_.import_tle``.
+        """
+        data = tle_text.encode("utf-8") if isinstance(tle_text, str) else tle_text
+        await self._post_write(
+            "/api/v1/write/tle",
+            data,
+            "text/plain",
+            database,
+            compress,
+            extra_headers={"x-arc-measurement": measurement},
+        )
+
+    async def tle_stats(self) -> dict[str, Any]:
+        """Get TLE streaming write statistics from ``/api/v1/write/tle/stats``."""
+        try:
+            response = await self._http.get("/api/v1/write/tle/stats")
+            body = response.json()
+        except Exception as e:
+            raise ArcIngestionError(f"Failed to get TLE stats: {e}") from e
+        return body.get("stats", body) if isinstance(body, dict) else {}
 
     def buffered(
         self,
@@ -136,33 +172,37 @@ class AsyncWriteClient:
 
         return AsyncBufferedWriter(self, batch_size, flush_interval)
 
-    async def _write_msgpack(
+    def _resolve_codec(self, compress: CompressArg) -> Compression:
+        """Resolve the effective compression codec for a write."""
+        if compress is None:
+            return Compression.coerce(self._config.compression)
+        return Compression.coerce(compress)
+
+    async def _post_write(
         self,
+        path: str,
         data: bytes,
+        content_type: str,
         database: Optional[str],
-        compress: Optional[bool],
+        compress: CompressArg,
+        extra_headers: Optional[dict[str, str]] = None,
     ) -> None:
-        """Send MessagePack data to Arc."""
-        should_compress = compress if compress is not None else self._config.compression
+        """Compress (if requested) and POST a write payload.
 
-        if should_compress:
-            data = compress_gzip(data)
+        Arc auto-detects gzip/zstd from the payload's magic bytes, so no
+        ``Content-Encoding`` header is sent.
+        """
+        codec = self._resolve_codec(compress)
+        data = compress_data(data, codec)
 
-        headers = {
-            "Content-Type": "application/msgpack",
-        }
-        if should_compress:
-            headers["Content-Encoding"] = "gzip"
-
+        headers = {"Content-Type": content_type}
+        if extra_headers:
+            headers.update(extra_headers)
         if database:
             headers["x-arc-database"] = database
 
         try:
-            response = await self._http.post(
-                "/api/v1/write/msgpack",
-                content=data,
-                headers=headers,
-            )
+            response = await self._http.post(path, content=data, headers=headers)
             if response.status_code not in (200, 204):
                 raise ArcIngestionError(
                     f"Write failed with status {response.status_code}: {response.text}"
@@ -171,39 +211,25 @@ class AsyncWriteClient:
             raise
         except Exception as e:
             raise ArcIngestionError(f"Failed to write data: {e}") from e
+
+    async def _write_msgpack(
+        self,
+        data: bytes,
+        database: Optional[str],
+        compress: CompressArg,
+    ) -> None:
+        """Send MessagePack data to Arc."""
+        await self._post_write(
+            "/api/v1/write/msgpack", data, "application/msgpack", database, compress
+        )
 
     async def _write_line_protocol(
         self,
         data: bytes,
         database: Optional[str],
-        compress: Optional[bool],
+        compress: CompressArg,
     ) -> None:
         """Send Line Protocol data to Arc."""
-        should_compress = compress if compress is not None else self._config.compression
-
-        if should_compress:
-            data = compress_gzip(data)
-
-        headers = {
-            "Content-Type": "text/plain",
-        }
-        if should_compress:
-            headers["Content-Encoding"] = "gzip"
-
-        if database:
-            headers["x-arc-database"] = database
-
-        try:
-            response = await self._http.post(
-                "/api/v1/write/line-protocol",
-                content=data,
-                headers=headers,
-            )
-            if response.status_code not in (200, 204):
-                raise ArcIngestionError(
-                    f"Write failed with status {response.status_code}: {response.text}"
-                )
-        except ArcIngestionError:
-            raise
-        except Exception as e:
-            raise ArcIngestionError(f"Failed to write data: {e}") from e
+        await self._post_write(
+            "/api/v1/write/line-protocol", data, "text/plain", database, compress
+        )

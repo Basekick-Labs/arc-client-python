@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Optional
 
 import httpx
 
 from arc_client.config import ClientConfig
 from arc_client.http.base import (
+    RETRYABLE_TRANSPORT_ERRORS,
     HTTPClientBase,
+    compute_backoff,
     handle_connection_error,
     handle_response_error,
+    is_retryable_status,
+    parse_retry_after,
 )
 
 
@@ -37,6 +42,46 @@ class SyncHTTPClient(HTTPClientBase):
             self._client.close()
             self._client = None
 
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: Optional[dict[str, str]] = None,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Send a request with retry/backoff for transient failures.
+
+        Retries connection/timeout errors and 429/503 responses up to
+        ``config.max_retries`` times, honoring ``Retry-After`` when present.
+        """
+        request_kwargs = self._prepare_request_kwargs(headers=headers, **kwargs)
+        client = self._get_client()
+        last_exc: Optional[Exception] = None
+
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                response = client.request(method, path, **request_kwargs)
+            except RETRYABLE_TRANSPORT_ERRORS as e:
+                last_exc = e
+                if attempt >= self.config.max_retries:
+                    break
+                time.sleep(compute_backoff(attempt, self.config.retry_backoff))
+                continue
+
+            if is_retryable_status(response.status_code) and attempt < self.config.max_retries:
+                retry_after = parse_retry_after(response)
+                time.sleep(compute_backoff(attempt, self.config.retry_backoff, retry_after))
+                continue
+
+            handle_response_error(response)
+            return response
+
+        # Exhausted retries on a transport error.
+        assert last_exc is not None
+        handle_connection_error(last_exc, self._build_url(path))
+        raise last_exc  # Never reached, but satisfies the type checker.
+
     def get(
         self,
         path: str,
@@ -44,14 +89,7 @@ class SyncHTTPClient(HTTPClientBase):
         headers: Optional[dict[str, str]] = None,
     ) -> httpx.Response:
         """Make a GET request."""
-        kwargs = self._prepare_request_kwargs(headers=headers, params=params)
-        try:
-            response = self._get_client().get(path, **kwargs)
-            handle_response_error(response)
-            return response
-        except httpx.ConnectError as e:
-            handle_connection_error(e, self._build_url(path))
-            raise  # Never reached, but satisfies type checker
+        return self._request("GET", path, headers=headers, params=params)
 
     def post(
         self,
@@ -60,20 +98,20 @@ class SyncHTTPClient(HTTPClientBase):
         content: Optional[bytes] = None,
         params: Optional[dict[str, Any]] = None,
         headers: Optional[dict[str, str]] = None,
+        files: Optional[Any] = None,
+        data: Optional[Any] = None,
     ) -> httpx.Response:
         """Make a POST request."""
-        kwargs = self._prepare_request_kwargs(headers=headers, params=params)
+        extra: dict[str, Any] = {}
         if json is not None:
-            kwargs["json"] = json
+            extra["json"] = json
         if content is not None:
-            kwargs["content"] = content
-        try:
-            response = self._get_client().post(path, **kwargs)
-            handle_response_error(response)
-            return response
-        except httpx.ConnectError as e:
-            handle_connection_error(e, self._build_url(path))
-            raise
+            extra["content"] = content
+        if files is not None:
+            extra["files"] = files
+        if data is not None:
+            extra["data"] = data
+        return self._request("POST", path, headers=headers, params=params, **extra)
 
     def put(
         self,
@@ -83,16 +121,10 @@ class SyncHTTPClient(HTTPClientBase):
         headers: Optional[dict[str, str]] = None,
     ) -> httpx.Response:
         """Make a PUT request."""
-        kwargs = self._prepare_request_kwargs(headers=headers, params=params)
+        extra: dict[str, Any] = {}
         if json is not None:
-            kwargs["json"] = json
-        try:
-            response = self._get_client().put(path, **kwargs)
-            handle_response_error(response)
-            return response
-        except httpx.ConnectError as e:
-            handle_connection_error(e, self._build_url(path))
-            raise
+            extra["json"] = json
+        return self._request("PUT", path, headers=headers, params=params, **extra)
 
     def patch(
         self,
@@ -102,16 +134,10 @@ class SyncHTTPClient(HTTPClientBase):
         headers: Optional[dict[str, str]] = None,
     ) -> httpx.Response:
         """Make a PATCH request."""
-        kwargs = self._prepare_request_kwargs(headers=headers, params=params)
+        extra: dict[str, Any] = {}
         if json is not None:
-            kwargs["json"] = json
-        try:
-            response = self._get_client().patch(path, **kwargs)
-            handle_response_error(response)
-            return response
-        except httpx.ConnectError as e:
-            handle_connection_error(e, self._build_url(path))
-            raise
+            extra["json"] = json
+        return self._request("PATCH", path, headers=headers, params=params, **extra)
 
     def delete(
         self,
@@ -120,14 +146,7 @@ class SyncHTTPClient(HTTPClientBase):
         headers: Optional[dict[str, str]] = None,
     ) -> httpx.Response:
         """Make a DELETE request."""
-        kwargs = self._prepare_request_kwargs(headers=headers, params=params)
-        try:
-            response = self._get_client().delete(path, **kwargs)
-            handle_response_error(response)
-            return response
-        except httpx.ConnectError as e:
-            handle_connection_error(e, self._build_url(path))
-            raise
+        return self._request("DELETE", path, headers=headers, params=params)
 
     def __enter__(self) -> SyncHTTPClient:
         return self

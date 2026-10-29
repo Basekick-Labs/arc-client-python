@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
@@ -37,6 +38,9 @@ class AsyncBufferedWriter:
         self._last_flush_time = time.monotonic()
         self._lock = asyncio.Lock()
         self._closed = False
+
+        # Background task that flushes on flush_interval even when idle.
+        self._flush_task: asyncio.Task[None] | None = None
 
     async def write(self, record: dict[str, Any]) -> None:
         """Write a single record to the buffer."""
@@ -95,6 +99,22 @@ class AsyncBufferedWriter:
         """Manually flush all buffered data."""
         async with self._lock:
             await self._flush_all_unlocked()
+
+    async def _flush_loop(self) -> None:
+        """Periodically flush measurements whose data has aged past the interval."""
+        try:
+            while True:
+                await asyncio.sleep(self._flush_interval)
+                async with self._lock:
+                    if self._closed:
+                        return
+                    if (
+                        self._buffers
+                        and time.monotonic() - self._last_flush_time >= self._flush_interval
+                    ):
+                        await self._flush_all_unlocked()
+        except asyncio.CancelledError:
+            return
 
     async def _flush_measurement_unlocked(self, measurement: str) -> None:
         """Flush a single measurement. Must hold lock."""
@@ -156,11 +176,21 @@ class AsyncBufferedWriter:
         if self._closed:
             return
 
+        # Cancel the timer task before the final flush so it can't race.
+        task = self._flush_task
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+            self._flush_task = None
+
         async with self._lock:
             await self._flush_all_unlocked()
             self._closed = True
 
     async def __aenter__(self) -> AsyncBufferedWriter:
+        if self._flush_task is None and self._flush_interval > 0:
+            self._flush_task = asyncio.ensure_future(self._flush_loop())
         return self
 
     async def __aexit__(self, *args: Any) -> None:

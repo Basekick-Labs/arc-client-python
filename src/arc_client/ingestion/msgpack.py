@@ -249,7 +249,11 @@ def dataframe_to_columnar(
         df: DataFrame to convert (pandas, polars, or pyarrow).
         measurement: Measurement name (not used in output, just for validation).
         time_column: Name of the timestamp column.
-        tag_columns: Columns to treat as tags (string dimensions).
+        tag_columns: Accepted for API stability but currently a no-op. The
+            columnar MessagePack write format has no tag/field distinction on the
+            wire (every non-time column is sent as a plain column); Arc derives
+            tag columns server-side from the data. Kept so callers can pass it
+            without breakage and so a future wire format can honor it.
 
     Returns:
         Dictionary of column name to list of values.
@@ -291,8 +295,7 @@ def _pandas_to_columnar(df: Any, time_column: str, tag_columns: list[str]) -> di
         # Handle timestamp column
         if col_name == time_column:
             if pd.api.types.is_datetime64_any_dtype(col):
-                # Convert datetime to microseconds since epoch
-                columns["time"] = (col.astype("int64") // 1000).tolist()
+                columns["time"] = _pandas_datetime_to_micros(col)
             else:
                 # Assume already numeric timestamps
                 columns["time"] = col.tolist()
@@ -303,8 +306,42 @@ def _pandas_to_columnar(df: Any, time_column: str, tag_columns: list[str]) -> di
     return columns
 
 
+def _pandas_datetime_to_micros(col: Any) -> list[Any]:
+    """Convert a pandas datetime64 column to microseconds since epoch.
+
+    The int64 view of a datetime64 column is in the column's own resolution
+    (ns/us/ms/s), so scale from that unit rather than assuming nanoseconds.
+    ``datetime64[us]`` must not be divided by 1000 the way ``datetime64[ns]`` is.
+    """
+    import numpy as np
+
+    dtype = col.dtype
+    # tz-aware columns use pandas' DatetimeTZDtype, which exposes ``.unit``.
+    # tz-naive columns use numpy datetime64, which does NOT — extract the unit
+    # from the numpy dtype instead of silently defaulting to nanoseconds.
+    unit = getattr(dtype, "unit", None)
+    if unit is None:
+        try:
+            unit = np.datetime_data(dtype)[0]
+        except (TypeError, ValueError):  # pragma: no cover - non-datetime dtype
+            unit = "ns"
+    as_int = col.astype("int64")
+    # Scale factor to reach microseconds; negative means multiply (upscale).
+    scale = {"ns": 1_000, "us": 1, "ms": -1_000, "s": -1_000_000}.get(unit, 1_000)
+    if scale == 1:
+        values = as_int
+    elif scale > 0:
+        values = as_int // scale
+    else:
+        values = as_int * (-scale)
+    result: list[Any] = values.tolist()
+    return result
+
+
 def _polars_to_columnar(df: Any, time_column: str, tag_columns: list[str]) -> dict[str, list[Any]]:
     """Convert Polars DataFrame to columnar format."""
+    import polars as pl
+
     if time_column not in df.columns:
         raise ArcValidationError(f"Time column '{time_column}' not found in DataFrame")
 
@@ -315,10 +352,21 @@ def _polars_to_columnar(df: Any, time_column: str, tag_columns: list[str]) -> di
 
         # Handle timestamp column
         if col_name == time_column:
-            # Check if it's a datetime type
-            if "datetime" in str(col.dtype).lower() or "date" in str(col.dtype).lower():
-                # Convert to microseconds
-                columns["time"] = col.cast(df.__class__._from_arrow.__self__.Int64).to_list()
+            dtype = col.dtype
+            if dtype == pl.Datetime:
+                # Casting a Datetime to Int64 yields the underlying integer in
+                # the series' own time_unit. Normalize that to microseconds.
+                as_int = col.cast(pl.Int64)
+                time_unit = getattr(dtype, "time_unit", "us")
+                if time_unit == "ns":
+                    columns["time"] = (as_int // 1_000).to_list()
+                elif time_unit == "ms":
+                    columns["time"] = (as_int * 1_000).to_list()
+                else:  # "us"
+                    columns["time"] = as_int.to_list()
+            elif dtype == pl.Date:
+                # Date is days since epoch; convert to microseconds.
+                columns["time"] = (col.cast(pl.Int64) * 86_400_000_000).to_list()
             else:
                 columns["time"] = col.to_list()
         else:
