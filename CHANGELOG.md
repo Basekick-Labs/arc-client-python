@@ -66,6 +66,8 @@ plus bug fixes and the first real HTTP-layer test coverage.
 
 ### Fixed
 
+- MessagePack queries preserve cap metadata and exact timestamp nanoseconds.
+  DELETE results retain partial-failure, cold-storage and peer diagnostics.
 - Retention and continuous-query clients accept Arc's list/null/flat response
   shapes. Sparse updates remain sparse; explicit full replacements support
   released servers, and CLEAR requests explicit null values on newer servers.
