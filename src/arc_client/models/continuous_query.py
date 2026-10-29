@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel
 
@@ -18,6 +18,7 @@ class ContinuousQuery(BaseModel):
     destination_measurement: str
     query: str
     interval: str
+    tag_columns: Optional[List[str]] = None
     retention_days: Optional[int] = None
     delete_source_after_days: Optional[int] = None
     is_active: bool = True
@@ -27,6 +28,14 @@ class ContinuousQuery(BaseModel):
     last_records_written: Optional[int] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+    @classmethod
+    def from_response(cls, data: dict[str, Any]) -> ContinuousQuery:
+        """Accept flat definitions and legacy mapping envelopes, never SQL text."""
+        if not isinstance(data, dict):
+            raise ValueError("Expected a continuous query object")
+        nested = data.get("query")
+        return cls(**nested) if isinstance(nested, dict) else cls(**data)
 
 
 class ExecuteCQResponse(BaseModel):
