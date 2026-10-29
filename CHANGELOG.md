@@ -33,6 +33,15 @@ plus bug fixes and the first real HTTP-layer test coverage.
   `retry_backoff`.
 - New exceptions: `ArcNotSupportedError` (501) and `ArcLicenseError` (403 for a
   missing enterprise-license feature; subclass of `ArcAuthenticationError`).
+- `ArcPermissionError` (403: the token lacks the permission the endpoint
+  requires), `ArcScopedAccessError` (403 from Arc's per-database check: the
+  token may read, but not the database asked for) and
+  `ArcPermissionDataUnavailableError` (403 because Arc could not load the
+  token's grants and failed closed — a server-side fault, not a statement
+  about the token). `ArcScopedAccessError` carries the refused database on
+  `.database`, empty or `"*"` when the call asked for every database. The
+  latter two subclass `ArcPermissionError`, which subclasses
+  `ArcAuthenticationError`, so existing `except` blocks keep working.
 - Real HTTP round-trip test coverage (via `pytest-httpx`) for headers, error
   mapping, compression on the wire, retries, msgpack decode, imports, databases,
   and enterprise wrappers — sync and async. Opt-in live integration tests under
@@ -46,6 +55,13 @@ plus bug fixes and the first real HTTP-layer test coverage.
   from the payload's magic bytes.
 - `User-Agent` is now derived from the package version instead of a hardcoded
   string, and the package version is a single source of truth read by the build.
+- HTTP 403 no longer collapses onto `ArcAuthenticationError`, which now means
+  only 401. The database listing endpoints need read permission and, where the
+  server restricts reads per database, a grant for the database — and Arc
+  refuses `databases.list()` for a tenant-scoped token rather than returning a
+  filtered list, matching `SHOW DATABASES`. That refusal is an expected state,
+  not a fault to retry: it raises `ArcScopedAccessError` naming the database,
+  while a token with no read permission raises `ArcPermissionError`.
 
 ### Fixed
 

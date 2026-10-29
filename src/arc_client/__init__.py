@@ -17,8 +17,11 @@ from arc_client.exceptions import (
     ArcLicenseError,
     ArcNotFoundError,
     ArcNotSupportedError,
+    ArcPermissionDataUnavailableError,
+    ArcPermissionError,
     ArcQueryError,
     ArcRateLimitError,
+    ArcScopedAccessError,
     ArcServerError,
     ArcValidationError,
 )
@@ -42,6 +45,9 @@ __all__ = [
     "ArcServerError",
     "ArcNotSupportedError",
     "ArcLicenseError",
+    "ArcPermissionError",
+    "ArcPermissionDataUnavailableError",
+    "ArcScopedAccessError",
     # Version
     "__version__",
 ]

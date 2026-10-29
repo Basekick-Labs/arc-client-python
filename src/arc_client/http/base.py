@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Optional
 
 import httpx
@@ -15,7 +16,10 @@ from arc_client.exceptions import (
     ArcLicenseError,
     ArcNotFoundError,
     ArcNotSupportedError,
+    ArcPermissionDataUnavailableError,
+    ArcPermissionError,
     ArcRateLimitError,
+    ArcScopedAccessError,
     ArcServerError,
 )
 
@@ -38,8 +42,83 @@ def build_headers(
     return headers
 
 
+# Arc sends HTTP 403 for three different things and distinguishes them only
+# by message, so the message is what these read. The shapes its read
+# middleware and handler gates produce:
+#
+#   no permission for read on database 'x'               -> scoped
+#   access denied: no read permission for database 'x'   -> scoped
+#   permission data unavailable                          -> grants unreadable
+#   token does not have 'read' permission                -> no read permission
+#   Permission denied: read required                     -> no read permission
+#
+# Only the first two are resolved by naming a different database, so they
+# must not collapse onto one exception. The patterns match the stable parts
+# of each message rather than the whole string, so a change to the permission
+# word or the surrounding punctuation cannot silently reclassify one as
+# another, and the database name is captured where Arc sends one.
+_SCOPED_DENIAL_RES = (
+    # The read middleware on the listing routes. The name is empty on the
+    # list-everything route, which sends no database.
+    re.compile(
+        r"^no permission for \w+ on database '(?P<database>[^']*)'",
+        re.IGNORECASE,
+    ),
+    # The handler gates' own wording.
+    re.compile(
+        r"^access denied: no \w+ permission for database '(?P<database>[^']*)'",
+        re.IGNORECASE,
+    ),
+)
+
+# Arc could not load the token's grants and refused rather than guess. A 403
+# like the others, but it says nothing about the token or the database, so it
+# must not be reported as a permission problem. Checked first.
+_PERMISSION_DATA_UNAVAILABLE = "permission data unavailable"
+
+
+def _scoped_denial_database(message: object) -> Optional[str]:
+    """Return the database named by a per-database denial, else None.
+
+    An empty capture is returned as ``""`` — Arc sends an empty name on the
+    list-everything route — so callers must test against ``None``, not
+    truthiness, to tell "not a scoped denial" from "scoped, no name".
+    """
+    if not isinstance(message, str):
+        return None
+    text = message.strip()
+    for pattern in _SCOPED_DENIAL_RES:
+        match = pattern.match(text)
+        if match is not None:
+            return match.group("database")
+    return None
+
+
+def _is_permission_data_unavailable(message: object) -> bool:
+    """True if Arc failed closed because it could not load the grants."""
+    return isinstance(message, str) and _PERMISSION_DATA_UNAVAILABLE in message.lower()
+
+
 def handle_response_error(response: httpx.Response) -> None:
-    """Handle HTTP error responses and raise appropriate exceptions."""
+    """Handle HTTP error responses and raise appropriate exceptions.
+
+    Raises:
+        ArcAuthenticationError: HTTP 401 — the token is missing, invalid or
+            expired. Re-authenticate.
+        ArcLicenseError: HTTP 403 naming an enterprise license.
+        ArcScopedAccessError: HTTP 403 from Arc's per-database permission
+            check — the token may read, but not the database asked for. A
+            subclass of ``ArcPermissionError``; carries ``database``.
+        ArcPermissionDataUnavailableError: HTTP 403 because Arc could not
+            load the token's grants and failed closed. A server-side fault,
+            not a statement about the token.
+        ArcPermissionError: any other HTTP 403 — the token does not carry the
+            permission the endpoint requires.
+        ArcNotFoundError: HTTP 404.
+        ArcRateLimitError: HTTP 429.
+        ArcNotSupportedError: HTTP 501.
+        ArcServerError: HTTP 5xx and any other non-2xx status.
+    """
     if response.is_success:
         return
 
@@ -58,7 +137,37 @@ def handle_response_error(response: httpx.Response) -> None:
         # ArcAuthenticationError, so plain permission-denied handling still works).
         if isinstance(message, str) and "enterprise license" in message.lower():
             raise ArcLicenseError(f"Enterprise license required: {message}")
-        raise ArcAuthenticationError(f"Permission denied: {message}")
+        # Checked before the scoped shape: Arc failing to read its own
+        # permission data is a server fault, and reporting it as "your token
+        # is scoped" would send the caller after a database that was never
+        # the problem.
+        if _is_permission_data_unavailable(message):
+            raise ArcPermissionDataUnavailableError(
+                f"Arc could not read its own permission data and refused the request "
+                f"rather than guessing. This is a server-side fault, not a problem "
+                f"with this token — check the Arc server log. ({message})"
+            )
+        # Arc's per-database check refuses a token that may read but holds no
+        # grant for the database asked for. Naming a database it is granted is
+        # the only thing that resolves it, so it gets its own exception rather
+        # than being reported as "this token cannot read".
+        database = _scoped_denial_database(message)
+        if database is not None:
+            if database in ("", "*"):
+                detail = (
+                    "this token is scoped to specific databases, so Arc will not list "
+                    "them all. Name one with get() or list_measurements()."
+                )
+            else:
+                detail = (
+                    f"this token is scoped to specific databases and holds no read "
+                    f"grant for {database!r}. Name a database it is granted."
+                )
+            raise ArcScopedAccessError(
+                f"Access denied: {detail} ({message})",
+                database=database,
+            )
+        raise ArcPermissionError(f"Permission denied: {message}")
     elif status_code == 404:
         raise ArcNotFoundError(f"Resource not found: {message}")
     elif status_code == 429:
