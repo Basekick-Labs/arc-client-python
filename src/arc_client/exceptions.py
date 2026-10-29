@@ -2,13 +2,29 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 
 class ArcError(Exception):
-    """Base exception for arc-client."""
+    """Base exception; HTTP failures retain structured diagnostics when available."""
 
-    pass
+    _response_body: Optional[dict[str, Any]] = None
+
+    @property
+    def response_body(self) -> Optional[dict[str, Any]]:
+        """Retain diagnostics through existing higher-level exception wrappers."""
+        error: Optional[BaseException] = self
+        seen: set[int] = set()
+        while isinstance(error, ArcError) and id(error) not in seen:
+            seen.add(id(error))
+            if error._response_body is not None:
+                return error._response_body
+            error = error.__cause__
+        return None
+
+    @response_body.setter
+    def response_body(self, value: Optional[dict[str, Any]]) -> None:
+        self._response_body = value
 
 
 class ArcConnectionError(ArcError):

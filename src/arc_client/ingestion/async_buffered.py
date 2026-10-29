@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import time
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any
@@ -38,9 +37,12 @@ class AsyncBufferedWriter:
         self._last_flush_time = time.monotonic()
         self._lock = asyncio.Lock()
         self._closed = False
+        self._closing = False
+        self._flush_error: BaseException | None = None
 
         # Background task that flushes on flush_interval even when idle.
         self._flush_task: asyncio.Task[None] | None = None
+        self._stop_event = asyncio.Event()
 
     async def write(self, record: dict[str, Any]) -> None:
         """Write a single record to the buffer."""
@@ -65,6 +67,9 @@ class AsyncBufferedWriter:
             columns[key] = [value]
 
         async with self._lock:
+            self._raise_if_failed()
+            if self._closed or self._closing:
+                raise RuntimeError("Buffered writer is closed")
             self._buffers[measurement].append(columns)
             self._record_counts[measurement] += 1
 
@@ -86,6 +91,9 @@ class AsyncBufferedWriter:
         num_records = len(next(iter(columns.values())))
 
         async with self._lock:
+            self._raise_if_failed()
+            if self._closed or self._closing:
+                raise RuntimeError("Buffered writer is closed")
             self._buffers[measurement].append(columns)
             self._record_counts[measurement] += num_records
 
@@ -96,25 +104,40 @@ class AsyncBufferedWriter:
                 await self._flush_all_unlocked()
 
     async def flush(self) -> None:
-        """Manually flush all buffered data."""
+        """Flush all buffered data, waiting for any in-flight write.
+
+        A failed write leaves its data pending and makes the buffer terminal:
+        subsequent flush/close calls raise that failure without retrying data
+        whose server outcome may be unknown. Producers wait while I/O runs.
+        """
         async with self._lock:
             await self._flush_all_unlocked()
 
     async def _flush_loop(self) -> None:
         """Periodically flush measurements whose data has aged past the interval."""
         try:
-            while True:
-                await asyncio.sleep(self._flush_interval)
+            while not self._stop_event.is_set():
+                try:
+                    await asyncio.wait_for(self._stop_event.wait(), self._flush_interval)
+                    return
+                except asyncio.TimeoutError:
+                    pass
                 async with self._lock:
-                    if self._closed:
+                    if self._closed or self._stop_event.is_set():
                         return
                     if (
                         self._buffers
                         and time.monotonic() - self._last_flush_time >= self._flush_interval
                     ):
                         await self._flush_all_unlocked()
-        except asyncio.CancelledError:
-            return
+        except Exception as error:
+            # Foreground flush/close will surface this error. Do not retry an
+            # uncertain outcome, or leave a task exception unobserved.
+            self._flush_error = error
+
+    def _raise_if_failed(self) -> None:
+        if self._flush_error is not None:
+            raise self._flush_error
 
     async def _flush_measurement_unlocked(self, measurement: str) -> None:
         """Flush a single measurement. Must hold lock."""
@@ -122,20 +145,21 @@ class AsyncBufferedWriter:
             return
 
         merged = self._merge_columnar(self._buffers[measurement])
-        self._buffers[measurement] = []
-        self._record_counts[measurement] = 0
-
-        # Release lock during I/O
-        self._lock.release()
+        # Retain data and the lock until acknowledgement. Concurrent timer,
+        # manual, and close flushes must never send the same batch twice.
         try:
             await self._client.write_columnar(measurement, merged)
-        finally:
-            await self._lock.acquire()
+        except BaseException as error:
+            self._flush_error = error
+            raise
+        self._buffers[measurement] = []
+        self._record_counts[measurement] = 0
 
         self._last_flush_time = time.monotonic()
 
     async def _flush_all_unlocked(self) -> None:
         """Flush all measurements. Must hold lock."""
+        self._raise_if_failed()
         measurements = list(self._buffers.keys())
         for measurement in measurements:
             if self._buffers[measurement]:
@@ -176,12 +200,13 @@ class AsyncBufferedWriter:
         if self._closed:
             return
 
-        # Cancel the timer task before the final flush so it can't race.
+        self._closing = True
+        # Wake an idle timer, but let any in-flight write finish. Shielding
+        # also prevents cancellation of close's caller from cancelling I/O.
+        self._stop_event.set()
         task = self._flush_task
         if task is not None:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            await asyncio.shield(task)
             self._flush_task = None
 
         async with self._lock:

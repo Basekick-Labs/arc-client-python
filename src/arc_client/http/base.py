@@ -13,6 +13,7 @@ from arc_client.config import ClientConfig
 from arc_client.exceptions import (
     ArcAuthenticationError,
     ArcConnectionError,
+    ArcError,
     ArcLicenseError,
     ArcNotFoundError,
     ArcNotSupportedError,
@@ -100,6 +101,19 @@ def _is_permission_data_unavailable(message: object) -> bool:
 
 
 def handle_response_error(response: httpx.Response) -> None:
+    """Raise the existing typed error, retaining the server's diagnostic object."""
+    try:
+        _raise_response_error(response)
+    except ArcError as error:
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        error.response_body = body if isinstance(body, dict) else None
+        raise
+
+
+def _raise_response_error(response: httpx.Response) -> None:
     """Handle HTTP error responses and raise appropriate exceptions.
 
     Raises:
@@ -185,7 +199,7 @@ def handle_connection_error(error: Exception, url: str) -> None:
     raise ArcConnectionError(f"Failed to connect to {url}: {error}") from error
 
 
-# Transport errors that are safe to retry (connection refused, DNS, timeouts).
+# Transient transport errors eligible for retry on read-only requests.
 RETRYABLE_TRANSPORT_ERRORS = (
     httpx.ConnectError,
     httpx.ConnectTimeout,
