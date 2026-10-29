@@ -1,7 +1,9 @@
 """Opt-in integration tests against a live Arc server.
 
 These run only when ``ARC_TEST_URL`` (and usually ``ARC_TEST_TOKEN``) are set;
-otherwise every test is skipped. They exercise the new 0.2.0 surface end-to-end.
+otherwise every test is skipped. Set ``ARC_TEST_GOVERNANCE=disabled`` only
+for a target without query governance; licensed targets must exercise it.
+They exercise the new 0.2.0 surface end-to-end.
 
 Run with, e.g.::
 
@@ -16,11 +18,12 @@ from __future__ import annotations
 import contextlib
 import os
 import time
+import uuid
 
 import pytest
 
 from arc_client import ArcClient
-from arc_client.exceptions import ArcLicenseError, ArcNotSupportedError
+from arc_client.exceptions import ArcLicenseError, ArcNotFoundError, ArcNotSupportedError
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("ARC_TEST_URL"),
@@ -36,21 +39,27 @@ def test_health_and_ready(sync_client: ArcClient) -> None:
 
 def test_columnar_write_then_query_msgpack(sync_client: ArcClient) -> None:
     base = int(time.time() * 1_000_000)
-    measurement = "sdk_it_cpu"
+    measurement = "sdk_it_cpu_" + uuid.uuid4().hex[:10]
     sync_client.write.write_columnar(
         measurement,
         {"time": [base, base + 1_000_000], "host": ["a", "b"], "usage": [1.0, 2.0]},
     )
-    # Give the server a moment to flush.
-    time.sleep(1.0)
-
-    try:
-        result = sync_client.query.query_msgpack(f"SELECT * FROM {measurement} ORDER BY time")
-    except ArcNotSupportedError:
-        pytest.skip("Server built without the duckdb_arrow build tag")
+    # Writes acknowledge buffering; the default server flush interval is five seconds.
+    deadline = time.monotonic() + 12
+    while True:
+        try:
+            result = sync_client.query.query_msgpack(
+                f"SELECT host, usage FROM {measurement} ORDER BY time"
+            )
+        except ArcNotSupportedError:
+            pytest.skip("Server built without the duckdb_arrow build tag")
+        if result.row_count == 2 or time.monotonic() >= deadline:
+            break
+        time.sleep(0.25)
 
     assert result.success
-    assert "usage" in result.columns
+    assert result.columns == ["host", "usage"]
+    assert result.data == [["a", 1.0], ["b", 2.0]]
 
 
 def test_databases_lifecycle(sync_client: ArcClient) -> None:
@@ -79,5 +88,9 @@ def test_enterprise_governance_usage_or_license_error(sync_client: ArcClient) ->
     # license/permission error rather than a crash.
     try:
         sync_client.governance.list_policies()
-    except ArcLicenseError:
-        pytest.skip("Server has no query_governance license feature (expected on OSS)")
+    except (ArcLicenseError, ArcNotFoundError):
+        # OSS may omit the route entirely. Only an explicitly unlicensed target
+        # may skip: a missing/broken route on a licensed target must still fail.
+        if os.environ.get("ARC_TEST_GOVERNANCE") != "disabled":
+            raise
+        pytest.skip("Governance explicitly disabled for this test target")
