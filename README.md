@@ -192,6 +192,30 @@ measurements = client.databases.list_measurements("metrics")
 client.databases.delete("metrics", confirm=True)
 ```
 
+The three read methods need a token with read permission. On a server that
+restricts reads per database they also need a grant for the database in
+question, and `list()` needs one covering every database — Arc refuses rather
+than returning a filtered list, the same way `SHOW DATABASES` does:
+
+```python
+from arc_client.exceptions import ArcScopedAccessError
+
+try:
+    databases = client.databases.list().databases
+except ArcScopedAccessError:
+    # Expected for a tenant-scoped token: it cannot enumerate every database,
+    # so ask for the one it is granted instead of retrying.
+    measurements = client.databases.list_measurements("metrics")
+```
+
+`ArcScopedAccessError.database` carries the database the call was refused for
+(empty or `"*"` when the call asked for every database). A token with no read
+permission at all raises `ArcPermissionError` instead; Arc failing to load the
+token's grants raises `ArcPermissionDataUnavailableError`, a server-side fault
+rather than a statement about the token; and a database that does not exist
+still raises `ArcNotFoundError` — "you may not read it" and "it is not there"
+stay apart.
+
 ## Querying Data
 
 ### JSON Response
@@ -445,7 +469,10 @@ the codec from the payload's magic bytes, so no `Content-Encoding` header is sen
 from arc_client.exceptions import (
     ArcError,              # Base exception
     ArcConnectionError,    # Connection failures
-    ArcAuthenticationError,# Auth failures (401/403)
+    ArcAuthenticationError,# Token missing, invalid or expired (401)
+    ArcPermissionError,    # Token lacks the required permission (403)
+    ArcScopedAccessError,  # Token may read, but not this database (403)
+    ArcPermissionDataUnavailableError, # Arc could not load the grants (403)
     ArcLicenseError,       # Enterprise feature not licensed (403)
     ArcQueryError,         # Query execution errors
     ArcIngestionError,     # Write failures

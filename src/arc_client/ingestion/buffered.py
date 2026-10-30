@@ -58,6 +58,8 @@ class BufferedWriter:
         self._last_flush_time = time.monotonic()
         self._lock = threading.Lock()
         self._closed = False
+        self._closing = False
+        self._flush_error: BaseException | None = None
 
         # Background timer that flushes on flush_interval even when no writes
         # arrive. Started on __enter__ and torn down on close().
@@ -99,6 +101,9 @@ class BufferedWriter:
             columns[key] = [value]
 
         with self._lock:
+            self._raise_if_failed()
+            if self._closed or self._closing:
+                raise RuntimeError("Buffered writer is closed")
             self._buffers[measurement].append(columns)
             self._record_counts[measurement] += 1
 
@@ -127,6 +132,9 @@ class BufferedWriter:
         num_records = len(next(iter(columns.values())))
 
         with self._lock:
+            self._raise_if_failed()
+            if self._closed or self._closing:
+                raise RuntimeError("Buffered writer is closed")
             self._buffers[measurement].append(columns)
             self._record_counts[measurement] += num_records
 
@@ -139,7 +147,12 @@ class BufferedWriter:
                 self._flush_all()
 
     def flush(self) -> None:
-        """Manually flush all buffered data."""
+        """Flush all buffered data, waiting for any in-flight write.
+
+        A failed write leaves its data pending and makes the buffer terminal:
+        subsequent flush/close calls raise that failure without retrying data
+        whose server outcome may be unknown. Producers wait while I/O runs.
+        """
         with self._lock:
             self._flush_all()
 
@@ -155,15 +168,25 @@ class BufferedWriter:
 
     def _flush_loop(self) -> None:
         """Periodically flush measurements whose data has aged past the interval."""
-        while not self._stop_event.wait(self._flush_interval):
+        try:
+            while not self._stop_event.wait(self._flush_interval):
+                with self._lock:
+                    if self._closed or self._stop_event.is_set():
+                        return
+                    if (
+                        self._buffers
+                        and time.monotonic() - self._last_flush_time >= self._flush_interval
+                    ):
+                        self._flush_all()
+        except Exception as error:
+            # Keep the error observable on foreground operations; never retry
+            # an uncertain write automatically from the background thread.
             with self._lock:
-                if self._closed:
-                    return
-                if (
-                    self._buffers
-                    and time.monotonic() - self._last_flush_time >= self._flush_interval
-                ):
-                    self._flush_all()
+                self._flush_error = error
+
+    def _raise_if_failed(self) -> None:
+        if self._flush_error is not None:
+            raise self._flush_error
 
     def _flush_measurement(self, measurement: str) -> None:
         """Flush a single measurement's buffer. Must hold lock."""
@@ -173,21 +196,21 @@ class BufferedWriter:
         # Merge all columnar batches into one
         merged = self._merge_columnar(self._buffers[measurement])
 
-        # Clear buffer
-        self._buffers[measurement] = []
-        self._record_counts[measurement] = 0
-
-        # Write to Arc (release lock during I/O)
-        self._lock.release()
+        # Keep ownership and data until the write is acknowledged. Holding
+        # the lock across I/O serializes timer, manual, and close flushes.
         try:
             self._client.write_columnar(measurement, merged)
-        finally:
-            self._lock.acquire()
+        except BaseException as error:
+            self._flush_error = error
+            raise
+        self._buffers[measurement] = []
+        self._record_counts[measurement] = 0
 
         self._last_flush_time = time.monotonic()
 
     def _flush_all(self) -> None:
         """Flush all measurements. Must hold lock."""
+        self._raise_if_failed()
         measurements = list(self._buffers.keys())
         for measurement in measurements:
             if self._buffers[measurement]:
@@ -229,11 +252,12 @@ class BufferedWriter:
         if self._closed:
             return
 
-        # Stop the timer thread first so it can't race the final flush.
+        self._closing = True
+        # Stop new timer work and wait for any active write to finish.
         self._stop_event.set()
         thread = self._flush_thread
         if thread is not None:
-            thread.join(timeout=self._flush_interval + 1.0)
+            thread.join()
             self._flush_thread = None
 
         with self._lock:

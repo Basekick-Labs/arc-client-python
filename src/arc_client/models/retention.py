@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class RetentionPolicy(BaseModel):
@@ -31,11 +31,23 @@ class ExecuteRetentionResponse(BaseModel):
     policy_name: str
     deleted_count: int = 0
     files_deleted: int = 0
+    skipped_files: int = 0
+    skipped_reason: str = ""
+    cold_files_deleted: int = 0
+    cold_rows_deleted: int = 0
+    cold_files_skipped: int = 0
+    cold_skipped_reason: str = ""
     execution_time_ms: float = 0.0
     dry_run: bool = False
     cutoff_date: Optional[str] = None
     affected_measurements: list[str] = Field(default_factory=list)
     error: Optional[str] = None
+
+    @field_validator("affected_measurements", mode="before")
+    @classmethod
+    def normalize_measurements(cls, value: Any) -> Any:
+        """Treat a nil Go slice as empty, preserving validation for other values."""
+        return [] if value is None else value
 
 
 class RetentionExecution(BaseModel):

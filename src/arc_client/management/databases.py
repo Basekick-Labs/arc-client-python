@@ -21,6 +21,15 @@ class DatabaseClient:
     Create and delete require an admin token. Delete additionally requires the
     server to have delete operations enabled and an explicit ``confirm=True``.
 
+    The three read methods need a token with read permission. On a server that
+    restricts reads per database they also need a grant for the database in
+    question, and :meth:`list` needs one covering every database — Arc refuses
+    rather than returning a filtered list, matching ``SHOW DATABASES``. That
+    refusal raises :class:`~arc_client.exceptions.ArcScopedAccessError`, which
+    is a normal state for a tenant-scoped token rather than a fault to retry;
+    a token with no read permission at all raises
+    :class:`~arc_client.exceptions.ArcPermissionError`.
+
     Example:
         >>> client.databases.create("metrics")
         >>> for db in client.databases.list().databases:
@@ -32,7 +41,21 @@ class DatabaseClient:
         self._config = config
 
     def list(self) -> DatabaseListResponse:
-        """List all databases."""
+        """List all databases.
+
+        Needs a token with read permission. Where the server restricts reads
+        per database, it also needs a grant covering every database: Arc
+        refuses this call for a token scoped to particular databases rather
+        than returning a filtered list, the same way ``SHOW DATABASES`` does.
+
+        Raises:
+            ArcScopedAccessError: The token is scoped to specific databases
+                (``database`` is ``"*"``). Expected for a tenant-scoped
+                token — name a database with :meth:`get` or
+                :meth:`list_measurements` instead of retrying.
+            ArcPermissionError: The token carries no read permission.
+            ArcAuthenticationError: The token is missing, invalid or expired.
+        """
         try:
             response = self._http.get("/api/v1/databases")
             return DatabaseListResponse.model_validate(response.json())
@@ -42,7 +65,18 @@ class DatabaseClient:
             raise ArcError(f"Failed to list databases: {e}") from e
 
     def get(self, name: str) -> DatabaseInfo:
-        """Get a single database by name."""
+        """Get a single database by name.
+
+        Raises:
+            ArcScopedAccessError: The token holds no read grant for ``name``
+                (carried on ``database``). It may be able to read others.
+            ArcPermissionError: The token carries no read permission.
+            ArcAuthenticationError: The token is missing, invalid or expired.
+            ArcNotFoundError: No such database. Kept separate from the
+                permission errors: "you may not read it" and "it is not
+                there" are different answers.
+            ArcValidationError: The name is not a valid database name.
+        """
         validate_name(name, "database")
         try:
             response = self._http.get(f"/api/v1/databases/{name}")
@@ -53,7 +87,16 @@ class DatabaseClient:
             raise ArcError(f"Failed to get database {name!r}: {e}") from e
 
     def list_measurements(self, name: str) -> MeasurementListResponse:
-        """List measurements within a database."""
+        """List measurements within a database.
+
+        Raises:
+            ArcScopedAccessError: The token holds no read grant for ``name``
+                (carried on ``database``). Ask for a database it is granted.
+            ArcPermissionError: The token carries no read permission.
+            ArcAuthenticationError: The token is missing, invalid or expired.
+            ArcNotFoundError: No such database.
+            ArcValidationError: The name is not a valid database name.
+        """
         validate_name(name, "database")
         try:
             response = self._http.get(f"/api/v1/databases/{name}/measurements")

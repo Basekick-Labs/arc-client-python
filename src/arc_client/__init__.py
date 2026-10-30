@@ -5,6 +5,7 @@
 # failure during package initialization.
 __version__ = "0.2.0"
 
+from arc_client._sentinels import CLEAR
 from arc_client.async_client import AsyncArcClient
 from arc_client.client import ArcClient
 from arc_client.compression import Compression
@@ -17,13 +18,17 @@ from arc_client.exceptions import (
     ArcLicenseError,
     ArcNotFoundError,
     ArcNotSupportedError,
+    ArcPermissionDataUnavailableError,
+    ArcPermissionError,
     ArcQueryError,
     ArcRateLimitError,
+    ArcScopedAccessError,
     ArcServerError,
     ArcValidationError,
 )
 
 __all__ = [
+    "CLEAR",
     # Clients
     "ArcClient",
     "AsyncArcClient",
@@ -42,6 +47,9 @@ __all__ = [
     "ArcServerError",
     "ArcNotSupportedError",
     "ArcLicenseError",
+    "ArcPermissionError",
+    "ArcPermissionDataUnavailableError",
+    "ArcScopedAccessError",
     # Version
     "__version__",
 ]
