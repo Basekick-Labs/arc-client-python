@@ -242,8 +242,26 @@ pl_df = client.query.query_polars("SELECT * FROM default.cpu LIMIT 1000")
 ### PyArrow Table (Zero-Copy)
 
 ```python
-table = client.query.query_arrow("SELECT * FROM default.cpu LIMIT 1000")
+table = client.query.query_arrow("SELECT * FROM cpu LIMIT 1000")
+metadata = table.schema.metadata or {}
+if metadata.get(b"arc.rows_capped") == b"true":
+    print("Policy capped the result at", int(metadata[b"arc.row_cap"]))
 ```
+
+`query_arrow()` still returns a `pyarrow.Table`, with authoritative completion
+metadata under reserved schema keys `arc.rows_capped`, `arc.row_cap` and
+`arc.execution_time_ms` (byte keys and values). A missing cap flag means unknown;
+`false` means the supported server completed its uncapped trailer contract.
+Timing promoted into initial headers cannot prove uncapped completion after
+final trailers disappear.
+Native column types and unrelated schema metadata are preserved. Truncated,
+malformed, conflicting or unobservable announced metadata raises `ArcQueryError`.
+DataFrame conversions can drop schema metadata; inspect the Arrow table first
+when completeness matters.
+
+Trailer capture is tested with HTTPX 0.27/0.28, httpcore 1.0.9 and h11 0.16.
+Those dependency bounds are deliberate: the adapter observes HTTP/1.1 parser
+completion without replacing HTTPX's TLS, proxy, timeout or pooling behavior.
 
 ### MessagePack Response (experimental)
 
@@ -498,3 +516,41 @@ See the [full documentation](https://docs.basekick.net/arc/sdks/python]) for det
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
+
+
+## Server compatibility and safe management updates
+
+The SDK distinguishes partial updates from complete replacements:
+
+- `update()` sends only supplied non-`None` fields, without fetching a definition.
+  Use this on servers with partial PUT semantics. Existing `None` arguments remain omitted;
+  use `from arc_client import CLEAR` to send JSON null for nullable update fields.
+- `replace()` sends every mutable field explicitly in one PUT. Arc 26.09.3 uses
+  full-definition PUT semantics for retention policies and continuous queries, so use
+  `replace()` on that release. The method also works on newer servers. It intentionally
+  overwrites the whole definition; coordinate concurrent edits before calling it.
+
+There is no server-capability guessing or retry with a different update payload.
+Both sync and async clients provide the same methods. CQ replacements include
+`tag_columns`; retention replacements include `database`, `measurement`, and `buffer_days`.
+
+Query results retain `truncated`, `truncation_reason`, `rows_capped`, and `row_cap`
+when their wire format supplies them. Experimental `query_msgpack()` returns UTC
+`datetime` values when a timestamp is exactly representable at microsecond resolution.
+Submicrosecond or out-of-range timestamps remain `msgpack.Timestamp`, preserving
+`.seconds`, `.nanoseconds`, and `.to_unix_nano()`. Such cells require an explicit
+serialization choice when exporting JSON. Arrow completion metadata is available
+in the returned table schema as described above.
+
+DELETE results expose failed, unreachable, unflushed, and cold-tier omission details.
+HTTP 207 remains a result that callers must inspect. Non-2xx typed exceptions retain
+structured details in `error.response_body`. Data DELETE requests are never automatically
+replayed after a server or transport failure, because work may already have committed.
+
+Automatic 429/503 and ambiguous transport retries apply only to read-only HTTP methods.
+Other mutations retry only connection-establishment failures; unknown write outcomes
+are surfaced for the caller to reconcile, rather than replayed automatically.
+
+Query requests already carry the configured database in `x-arc-database`. Use
+unqualified measurement names in those SQL requests, for example
+`client.query.query("SELECT * FROM cpu LIMIT 10")`.

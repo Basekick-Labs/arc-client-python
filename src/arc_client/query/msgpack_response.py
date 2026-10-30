@@ -4,8 +4,10 @@ Arc's ``POST /api/v1/query/msgpack`` returns a **columnar** MessagePack envelope
 (``application/msgpack``): a map with keys ``success, columns, types, data,
 row_count, execution_time_ms, timestamp``. ``data`` is an array-of-columns
 (one inner array per column), not row-major, and timestamp columns arrive as
-native MessagePack timestamp extensions (decoded here to ``datetime``). Per-cell
-nulls are possible.
+native MessagePack timestamp extensions. Values exactly representable by Python
+``datetime`` are decoded to UTC datetimes; submicrosecond or out-of-range values
+remain ``msgpack.Timestamp`` objects, preserving their seconds and nanoseconds.
+Per-cell nulls are possible.
 
 The error envelope is a 4-key map ``{success: false, error, execution_time_ms,
 timestamp}``.
@@ -30,6 +32,9 @@ def decode_msgpack_query_response(content: bytes) -> QueryResponse:
 
     The columnar ``data`` is transposed to row-major so the result matches the
     JSON query path (``QueryResponse.data`` is a list of rows).
+    Timestamp cells, including those nested in lists or maps, become UTC
+    ``datetime`` values only when that conversion is lossless. Other timestamps
+    remain ``msgpack.Timestamp``; use ``to_unix_nano()`` for exact epoch nanoseconds.
 
     Args:
         content: Raw MessagePack response body.
@@ -42,8 +47,9 @@ def decode_msgpack_query_response(content: bytes) -> QueryResponse:
         ArcQueryError: If the body cannot be decoded or reports ``success=false``.
     """
     try:
-        # timestamp=3 decodes native msgpack timestamp extensions to datetime.
-        envelope = msgpack.unpackb(content, timestamp=3, raw=False)
+        # timestamp=3 silently drops submicrosecond precision. Decode the native
+        # values first, then convert only timestamps datetime can represent exactly.
+        envelope = _decode_timestamps(msgpack.unpackb(content, timestamp=0, raw=False))
     except Exception as e:  # pragma: no cover - malformed body is rare
         raise ArcQueryError(f"Failed to decode msgpack query response: {e}") from e
 
@@ -70,9 +76,30 @@ def decode_msgpack_query_response(content: bytes) -> QueryResponse:
         types=types,
         data=rows,
         row_count=row_count if row_count else len(rows),
+        truncated=envelope.get("truncated", False),
+        truncation_reason=envelope.get("truncation_reason"),
+        rows_capped=envelope.get("rows_capped", False),
+        row_cap=envelope.get("row_cap"),
         execution_time_ms=float(execution_time_ms),
         timestamp=str(timestamp) if timestamp is not None else None,
     )
+
+
+def _decode_timestamps(value: Any) -> Any:
+    """Preserve precision and range while retaining datetime where lossless."""
+    if isinstance(value, msgpack.Timestamp):
+        if value.nanoseconds % 1000 == 0:
+            try:
+                return value.to_datetime()
+            except (OverflowError, ValueError):
+                # MessagePack supports a wider seconds range than datetime.
+                pass
+        return value
+    if isinstance(value, list):
+        return [_decode_timestamps(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _decode_timestamps(item) for key, item in value.items()}
+    return value
 
 
 def _transpose_columns(column_data: list[list[Any]], row_count: int) -> list[list[Any]]:
