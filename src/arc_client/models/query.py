@@ -15,6 +15,10 @@ class QueryResponse(BaseModel):
         columns: List of column names in the result.
         data: List of rows, where each row is a list of values.
         row_count: Number of rows returned.
+        truncated: Whether the result was cut short by a query failure.
+        truncation_reason: Reason the result was truncated, if available.
+        rows_capped: Whether the result reached a configured row cap.
+        row_cap: Configured row cap, if available.
         execution_time_ms: Query execution time in milliseconds.
         timestamp: Server timestamp when the query was executed.
         error: Error message if the query failed.
@@ -24,11 +28,14 @@ class QueryResponse(BaseModel):
     columns: list[str] = Field(default_factory=list)
     data: list[list[Any]] = Field(default_factory=list)
     row_count: int = 0
+    truncated: bool = False
+    truncation_reason: Optional[str] = None
+    rows_capped: bool = False
+    row_cap: Optional[int] = None
     execution_time_ms: float = 0.0
     timestamp: Optional[str] = None
     error: Optional[str] = None
-    # Populated only by the msgpack query path (``query_msgpack``); the JSON
-    # path leaves it empty. Parallel to ``columns``: Arrow type name per column.
+    # Parallel to ``columns``: Arrow type name per column, when supplied.
     types: list[str] = Field(default_factory=list)
 
 
