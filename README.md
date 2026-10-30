@@ -225,6 +225,11 @@ result = client.query.query("SELECT * FROM default.cpu WHERE time > now() - INTE
 print(result.columns)  # ['time', 'host', 'usage']
 print(result.data)     # [[1633024800000000, 'server01', 45.2], ...]
 print(result.row_count)
+
+if result.truncated:
+    print(f"The result is incomplete: {result.truncation_reason}")
+if result.rows_capped:
+    print(f"The result reached the configured cap of {result.row_cap} rows")
 ```
 
 ### pandas DataFrame

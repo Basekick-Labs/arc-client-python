@@ -57,9 +57,37 @@ class TestQueryResponse:
         assert response.columns == []
         assert response.data == []
         assert response.row_count == 0
+        assert response.truncated is False
+        assert response.truncation_reason is None
+        assert response.rows_capped is False
+        assert response.row_cap is None
         assert response.execution_time_ms == 0.0
         assert response.timestamp is None
         assert response.error is None
+
+    def test_query_response_exposes_truncation_and_row_cap_metadata(self) -> None:
+        """Test completeness metadata returned by Arc query endpoints."""
+        truncated_response = QueryResponse(
+            success=True,
+            truncated=True,
+            truncation_reason="result limit reached",
+        )
+
+        assert truncated_response.truncated is True
+        assert truncated_response.truncation_reason == "result limit reached"
+        assert truncated_response.rows_capped is False
+        assert truncated_response.row_cap is None
+
+        capped_response = QueryResponse(
+            success=True,
+            rows_capped=True,
+            row_cap=1000,
+        )
+
+        assert capped_response.truncated is False
+        assert capped_response.truncation_reason is None
+        assert capped_response.rows_capped is True
+        assert capped_response.row_cap == 1000
 
 
 class TestEstimateResponse:
