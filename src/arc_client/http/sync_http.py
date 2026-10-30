@@ -52,24 +52,37 @@ class SyncHTTPClient(HTTPClientBase):
     ) -> httpx.Response:
         """Send a request with retry/backoff for transient failures.
 
-        Retries connection/timeout errors and 429/503 responses up to
-        ``config.max_retries`` times, honoring ``Retry-After`` when present.
+        Reads retry transient failures up to ``config.max_retries`` times.
+        Mutations retry only connection establishment failures; data DELETE
+        never retries. Unknown write outcomes are returned to the caller.
         """
         request_kwargs = self._prepare_request_kwargs(headers=headers, **kwargs)
         client = self._get_client()
         last_exc: Optional[Exception] = None
+        read_only = method.upper() in {"GET", "HEAD", "OPTIONS"}
+        # DELETE may partially commit. Other mutations may be retried only
+        # when no application request could have reached the server.
+        data_delete = method.upper() == "POST" and path.rstrip("/") == "/api/v1/delete"
 
         for attempt in range(self.config.max_retries + 1):
             try:
                 response = client.request(method, path, **request_kwargs)
             except RETRYABLE_TRANSPORT_ERRORS as e:
                 last_exc = e
-                if attempt >= self.config.max_retries:
+                if (
+                    data_delete
+                    or not (read_only or isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout)))
+                    or attempt >= self.config.max_retries
+                ):
                     break
                 time.sleep(compute_backoff(attempt, self.config.retry_backoff))
                 continue
 
-            if is_retryable_status(response.status_code) and attempt < self.config.max_retries:
+            if (
+                read_only
+                and is_retryable_status(response.status_code)
+                and attempt < self.config.max_retries
+            ):
                 retry_after = parse_retry_after(response)
                 time.sleep(compute_backoff(attempt, self.config.retry_backoff, retry_after))
                 continue

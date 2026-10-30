@@ -4,8 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_call:  # Allow release.yml to call this workflow
+
+env:
+  UV_PYTHON: "3.11"
 
 jobs:
   lint:
@@ -23,7 +25,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra all
 
       - name: Run ruff check
         run: uv run ruff check .
@@ -46,13 +48,15 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra all
 
       - name: Run mypy
         run: uv run mypy src/arc_client --ignore-missing-imports
 
   test:
     name: Test (Python ${{ matrix.python-version }})
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -71,10 +75,12 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra all
 
       - name: Run tests
-        run: uv run pytest tests/unit -v --tb=short
+        run: |
+          uv run python --version
+          uv run pytest tests/unit -v --tb=short
 
   test-platforms:
     name: Test (${{ matrix.os }})
@@ -96,10 +102,12 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra all
 
       - name: Run tests
-        run: uv run pytest tests/unit -v --tb=short
+        run: |
+          uv run python --version
+          uv run pytest tests/unit -v --tb=short
 
   coverage:
     name: Coverage
@@ -116,7 +124,7 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra all
 
       - name: Run tests with coverage
         run: uv run pytest tests/unit --cov=src/arc_client --cov-report=xml

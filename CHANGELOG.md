@@ -5,7 +5,7 @@ All notable changes to `arc-tsdb-client` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0] - 2026-07-03
+## [0.2.0] - Unreleased
 
 A large feature-parity release bringing the SDK up to date with the Arc server,
 plus bug fixes and the first real HTTP-layer test coverage.
@@ -28,11 +28,21 @@ plus bug fixes and the first real HTTP-layer test coverage.
   `mqtt`.
 - **zstd write compression** (now the default; gzip and none still supported).
   Compression is configurable via a `Compression` enum, a string, or a bool.
-- **Automatic retries** with exponential backoff + jitter for connection errors,
-  429 (honoring `Retry-After`), and 503. Configurable via `max_retries` /
-  `retry_backoff`.
+- **Automatic retries** with exponential backoff + jitter for read-only
+  connection/transport failures, 429 (honoring `Retry-After`) and 503. Mutations
+  retry only connection establishment; data DELETE never retries. Configure
+  via `max_retries` / `retry_backoff`.
 - New exceptions: `ArcNotSupportedError` (501) and `ArcLicenseError` (403 for a
   missing enterprise-license feature; subclass of `ArcAuthenticationError`).
+- `ArcPermissionError` (403: the token lacks the permission the endpoint
+  requires), `ArcScopedAccessError` (403 from Arc's per-database check: the
+  token may read, but not the database asked for) and
+  `ArcPermissionDataUnavailableError` (403 because Arc could not load the
+  token's grants and failed closed — a server-side fault, not a statement
+  about the token). `ArcScopedAccessError` carries the refused database on
+  `.database`, empty or `"*"` when the call asked for every database. The
+  latter two subclass `ArcPermissionError`, which subclasses
+  `ArcAuthenticationError`, so existing `except` blocks keep working.
 - Real HTTP round-trip test coverage (via `pytest-httpx`) for headers, error
   mapping, compression on the wire, retries, msgpack decode, imports, databases,
   and enterprise wrappers — sync and async. Opt-in live integration tests under
@@ -46,8 +56,21 @@ plus bug fixes and the first real HTTP-layer test coverage.
   from the payload's magic bytes.
 - `User-Agent` is now derived from the package version instead of a hardcoded
   string, and the package version is a single source of truth read by the build.
+- HTTP 403 no longer collapses onto `ArcAuthenticationError`, which now means
+  only 401. The database listing endpoints need read permission and, where the
+  server restricts reads per database, a grant for the database — and Arc
+  refuses `databases.list()` for a tenant-scoped token rather than returning a
+  filtered list, matching `SHOW DATABASES`. That refusal is an expected state,
+  not a fault to retry: it raises `ArcScopedAccessError` naming the database,
+  while a token with no read permission raises `ArcPermissionError`.
 
 ### Fixed
+
+- Retention and continuous-query clients accept Arc's list/null/flat response
+  shapes. Sparse updates remain sparse; explicit full replacements support
+  released servers, and CLEAR requests explicit null values on newer servers.
+- Buffered close waits for active writes, retains unacknowledged batches and
+  surfaces failures without replay. Typed errors retain structured diagnostics.
 
 - Polars datetime → columnar conversion used a fragile private attribute that
   raised at runtime; it now casts via the public `polars` API and normalizes the

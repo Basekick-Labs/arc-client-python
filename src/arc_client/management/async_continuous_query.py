@@ -5,8 +5,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, List, Optional, Union
 
+from arc_client._sentinels import CLEAR, ClearType
 from arc_client.config import ClientConfig
-from arc_client.exceptions import ArcError, ArcNotFoundError
+from arc_client.exceptions import ArcError, ArcNotFoundError, ArcValidationError
 from arc_client.http.async_http import AsyncHTTPClient
 from arc_client.models.continuous_query import (
     ContinuousQuery,
@@ -34,6 +35,8 @@ class AsyncContinuousQueryClient:
         retention_days: Optional[int] = None,
         delete_source_after_days: Optional[int] = None,
         is_active: bool = True,
+        *,
+        tag_columns: Optional[List[str]] = None,
     ) -> ContinuousQuery:
         """Create a new continuous query."""
         payload = {
@@ -47,13 +50,14 @@ class AsyncContinuousQueryClient:
             "retention_days": retention_days,
             "delete_source_after_days": delete_source_after_days,
             "is_active": is_active,
+            "tag_columns": tag_columns,
         }
         try:
             response = await self._http.post("/api/v1/continuous_queries", json=payload)
             data = response.json()
             if not data.get("success", True):
                 raise ArcError(data.get("error", "Failed to create CQ"))
-            return ContinuousQuery(**data.get("query", data))
+            return ContinuousQuery.from_response(data)
         except ArcError:
             raise
         except Exception as e:
@@ -72,8 +76,21 @@ class AsyncContinuousQueryClient:
 
             response = await self._http.get("/api/v1/continuous_queries", params=params)
             data = response.json()
-            queries = data.get("queries", [])
-            return [ContinuousQuery(**q) for q in queries]
+            if data is None:
+                queries = []
+            elif isinstance(data, list):
+                queries = data
+            elif isinstance(data, dict) and "queries" in data:
+                queries = data["queries"]
+                if queries is None:
+                    queries = []
+            else:
+                raise ArcError("Malformed continuous query list: expected an array")
+            if not isinstance(queries, list):
+                raise ArcError("Malformed continuous query list: expected an array")
+            return [ContinuousQuery.from_response(q) for q in queries]
+        except ArcError:
+            raise
         except Exception as e:
             raise ArcError(f"Failed to list continuous queries: {e}") from e
 
@@ -87,7 +104,7 @@ class AsyncContinuousQueryClient:
                 if "not found" in error.lower():
                     raise ArcNotFoundError(f"CQ {query_id} not found")
                 raise ArcError(error)
-            return ContinuousQuery(**data.get("query", data))
+            return ContinuousQuery.from_response(data)
         except (ArcNotFoundError, ArcError):
             raise
         except Exception as e:
@@ -97,30 +114,85 @@ class AsyncContinuousQueryClient:
         self,
         query_id: int,
         name: Optional[str] = None,
-        description: Optional[str] = None,
+        description: Union[str, ClearType, None] = None,
         query: Optional[str] = None,
         interval: Optional[str] = None,
-        retention_days: Optional[int] = None,
-        delete_source_after_days: Optional[int] = None,
+        retention_days: Union[int, ClearType, None] = None,
+        delete_source_after_days: Union[int, ClearType, None] = None,
         is_active: Optional[bool] = None,
+        *,
+        database: Optional[str] = None,
+        source_measurement: Optional[str] = None,
+        destination_measurement: Optional[str] = None,
+        tag_columns: Union[List[str], ClearType, None] = None,
     ) -> ContinuousQuery:
-        """Update a continuous query."""
-        payload: dict[str, Any] = {}
-        if name is not None:
-            payload["name"] = name
-        if description is not None:
-            payload["description"] = description
-        if query is not None:
-            payload["query"] = query
-        if interval is not None:
-            payload["interval"] = interval
-        if retention_days is not None:
-            payload["retention_days"] = retention_days
-        if delete_source_after_days is not None:
-            payload["delete_source_after_days"] = delete_source_after_days
-        if is_active is not None:
-            payload["is_active"] = is_active
+        """Send a partial update without reading or replacing unrelated fields.
 
+        None omits an argument, preserving existing caller behavior. CLEAR
+        sends JSON null for nullable fields. Servers with full-replacement
+        PUT semantics (including Arc 26.09.3) require replace() instead.
+        """
+        values = {
+            "name": name,
+            "description": description,
+            "query": query,
+            "interval": interval,
+            "retention_days": retention_days,
+            "delete_source_after_days": delete_source_after_days,
+            "is_active": is_active,
+            "database": database,
+            "source_measurement": source_measurement,
+            "destination_measurement": destination_measurement,
+            "tag_columns": tag_columns,
+        }
+        nullable = {"description", "tag_columns", "retention_days", "delete_source_after_days"}
+        payload: dict[str, Any] = {}
+        for key, value in values.items():
+            if value is CLEAR:
+                if key not in nullable:
+                    raise ArcValidationError(f"{key} may not be cleared")
+                payload[key] = None
+            elif value is not None:
+                payload[key] = value
+        return await self._put_definition(query_id, payload)
+
+    async def replace(
+        self,
+        query_id: int,
+        *,
+        name: str,
+        database: str,
+        source_measurement: str,
+        destination_measurement: str,
+        query: str,
+        interval: str,
+        description: Optional[str],
+        tag_columns: Optional[List[str]],
+        retention_days: Optional[int],
+        delete_source_after_days: Optional[int],
+        is_active: bool,
+    ) -> ContinuousQuery:
+        """Replace all mutable fields with one PUT on old or new servers.
+
+        Every field must be explicit. This operation intentionally overwrites
+        the definition; it does not fetch or merge a potentially stale copy.
+        """
+        payload = {
+            "name": name,
+            "database": database,
+            "source_measurement": source_measurement,
+            "destination_measurement": destination_measurement,
+            "query": query,
+            "interval": interval,
+            "description": description,
+            "tag_columns": tag_columns,
+            "retention_days": retention_days,
+            "delete_source_after_days": delete_source_after_days,
+            "is_active": is_active,
+        }
+        return await self._put_definition(query_id, payload)
+
+    async def _put_definition(self, query_id: int, payload: dict[str, Any]) -> ContinuousQuery:
         try:
             response = await self._http.put(f"/api/v1/continuous_queries/{query_id}", json=payload)
             data = response.json()
@@ -129,8 +201,8 @@ class AsyncContinuousQueryClient:
                 if "not found" in error.lower():
                     raise ArcNotFoundError(f"CQ {query_id} not found")
                 raise ArcError(error)
-            return ContinuousQuery(**data.get("query", data))
-        except (ArcNotFoundError, ArcError):
+            return ContinuousQuery.from_response(data)
+        except ArcError:
             raise
         except Exception as e:
             raise ArcError(f"Failed to update continuous query: {e}") from e
@@ -186,6 +258,12 @@ class AsyncContinuousQueryClient:
             )
             data = response.json()
             executions = data.get("executions", [])
+            if executions is None:
+                executions = []
+            if not isinstance(executions, list):
+                raise ArcError("Malformed CQ history: expected an array")
             return [CQExecution(**e) for e in executions]
+        except ArcError:
+            raise
         except Exception as e:
             raise ArcError(f"Failed to get CQ executions: {e}") from e
