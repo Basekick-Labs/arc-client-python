@@ -6,6 +6,15 @@ Python SDK for [Arc](https://github.com/basekick-labs/arc) time-series database.
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+
+This README describes SDK development revision `539505c` (`0.2.0`, unreleased).
+The latest published SDK release, `0.1.2`, does not include the management and
+completion-metadata changes below. To reproduce these examples, install this revision:
+
+```bash
+pip install 'arc-tsdb-client @ git+https://github.com/Basekick-Labs/arc-client-python.git@539505c0b0f2113b1acbbe5b406abef89ec5b6fe'
+```
+
 ## Installation
 
 ```bash
@@ -46,7 +55,7 @@ with ArcClient(host="localhost", token="your-token") as client:
     )
 
     # Query to pandas DataFrame
-    df = client.query.query_pandas("SELECT * FROM default.cpu WHERE host = 'server01'")
+    df = client.query.query_pandas("SELECT * FROM cpu WHERE host = 'server01'")
     print(df)
 ```
 
@@ -221,7 +230,7 @@ stay apart.
 ### JSON Response
 
 ```python
-result = client.query.query("SELECT * FROM default.cpu WHERE time > now() - INTERVAL '1 hour'")
+result = client.query.query("SELECT * FROM cpu WHERE time > now() - INTERVAL '1 hour'")
 print(result.columns)  # ['time', 'host', 'usage']
 print(result.data)     # [[1633024800000000, 'server01', 45.2], ...]
 print(result.row_count)
@@ -230,13 +239,13 @@ print(result.row_count)
 ### pandas DataFrame
 
 ```python
-df = client.query.query_pandas("SELECT * FROM default.cpu LIMIT 1000")
+df = client.query.query_pandas("SELECT * FROM cpu LIMIT 1000")
 ```
 
 ### Polars DataFrame
 
 ```python
-pl_df = client.query.query_polars("SELECT * FROM default.cpu LIMIT 1000")
+pl_df = client.query.query_polars("SELECT * FROM cpu LIMIT 1000")
 ```
 
 ### PyArrow Table (Zero-Copy)
@@ -270,7 +279,7 @@ the same `QueryResponse` shape as `query()` (row-major `data`), plus per-column
 Arrow types in `.types`:
 
 ```python
-result = client.query.query_msgpack("SELECT * FROM default.cpu LIMIT 1000")
+result = client.query.query_msgpack("SELECT * FROM cpu LIMIT 1000")
 print(result.columns, result.types)
 ```
 
@@ -283,7 +292,7 @@ print(result.columns, result.types)
 Preview query cost before execution:
 
 ```python
-estimate = client.query.estimate("SELECT * FROM default.cpu")
+estimate = client.query.estimate("SELECT * FROM cpu")
 print(f"Estimated rows: {estimate.estimated_rows}")
 print(f"Warning level: {estimate.warning_level}")  # none, low, medium, high
 ```
@@ -313,7 +322,7 @@ async def main():
         )
 
         # Query
-        df = await client.query.query_pandas("SELECT * FROM default.cpu")
+        df = await client.query.query_pandas("SELECT * FROM cpu")
 
         # Buffered writes
         async with client.write.buffered(batch_size=5000) as buffer:
@@ -327,7 +336,7 @@ asyncio.run(main())
 
 ### Retention Policies
 
-Automatically delete old data:
+Manage retention policies (automatic execution requires an enabled, licensed scheduler):
 
 ```python
 # Create policy
@@ -351,7 +360,7 @@ result = client.retention.execute(policy.id, dry_run=False, confirm=True)
 
 ### Continuous Queries
 
-Aggregate and downsample data automatically:
+Manage continuous queries (automatic execution requires an enabled, licensed scheduler):
 
 ```python
 # Create a CQ to downsample CPU metrics to 1-hour averages
@@ -360,7 +369,7 @@ cq = client.continuous_queries.create(
     database="default",
     source_measurement="cpu",
     destination_measurement="cpu_1h",
-    query="SELECT time_bucket('1 hour', time) as time, host, avg(usage) as usage FROM default.cpu GROUP BY 1, 2",
+    query="SELECT time_bucket('1 hour', time) as time, host, avg(usage) as usage FROM default.cpu WHERE time >= {start_time} AND time < {end_time} GROUP BY 1, 2",
     interval="1h",
 )
 
@@ -511,7 +520,7 @@ except ArcConnectionError as e:
 
 ## Documentation
 
-See the [full documentation](https://docs.basekick.net/arc/sdks/python]) for detailed guides and API reference.
+See the [full documentation](https://docs.basekick.net/arc/sdks/python/) for detailed guides and API reference.
 
 ## License
 
@@ -527,11 +536,12 @@ The SDK distinguishes partial updates from complete replacements:
   use `from arc_client import CLEAR` to send JSON null for nullable update fields.
 - `replace()` sends every mutable field explicitly in one PUT. Arc 26.09.3 uses
   full-definition PUT semantics for retention policies and continuous queries, so use
-  `replace()` on that release. The method also works on newer servers. It intentionally
+  `replace()` on that release. The method also supports servers with partial PUT semantics. It intentionally
   overwrites the whole definition; coordinate concurrent edits before calling it.
 
 There is no server-capability guessing or retry with a different update payload.
-Both sync and async clients provide the same methods. CQ replacements include
+Both sync and async clients provide the same methods. Other Arc releases are
+still being validated; this is not a compatibility guarantee for every release. CQ replacements include
 `tag_columns`; retention replacements include `database`, `measurement`, and `buffer_days`.
 
 Query results retain `truncated`, `truncation_reason`, `rows_capped`, and `row_cap`
@@ -551,6 +561,12 @@ Automatic 429/503 and ambiguous transport retries apply only to read-only HTTP m
 Other mutations retry only connection-establishment failures; unknown write outcomes
 are surfaced for the caller to reconcile, rather than replayed automatically.
 
-Query requests already carry the configured database in `x-arc-database`. Use
+Query-client requests already carry the configured database in `x-arc-database`. Use
 unqualified measurement names in those SQL requests, for example
-`client.query.query("SELECT * FROM cpu LIMIT 10")`.
+`client.query.query("SELECT * FROM cpu LIMIT 10")`. CQ definitions run inside
+the server and use the qualified source measurement, such as `default.cpu`,
+as shown in the CQ example above.
+
+A client timeout does not confirm cancellation of retention work. Check execution
+history and resulting data before submitting it again. On affected server versions,
+running executions may be absent from history until completion.
