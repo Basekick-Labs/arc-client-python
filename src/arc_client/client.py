@@ -101,6 +101,7 @@ class ArcClient:
         self._edge_sync: Any = None
         self._diagnostics: Any = None
         self._reconciliation: Any = None
+        self._write_diagnostics: Any = None
 
     def _get_http(self) -> SyncHTTPClient:
         """Get or create the HTTP client."""
@@ -256,6 +257,15 @@ class ArcClient:
 
             self._backup = BackupClient(self._get_http(), self._config)
         return self._backup
+
+    @property
+    def write_diagnostics(self) -> Any:
+        """Get read-only Line Protocol and MessagePack diagnostics."""
+        if self._write_diagnostics is None:
+            from arc_client.management.write_diagnostics import WriteDiagnosticsClient
+
+            self._write_diagnostics = WriteDiagnosticsClient(self._get_http(), self._config)
+        return self._write_diagnostics
 
     @property
     def mqtt(self) -> Any:

@@ -65,6 +65,10 @@ plus bug fixes and the first real HTTP-layer test coverage.
   - Admin `logs`, `memstats`, `duckdb_memory` and
     `free_os_memory(confirm=True)`.
   - `auth.cache_stats()` and `auth.invalidate_cache()`.
+- **Write-protocol diagnostics** (`client.write_diagnostics`, sync + async):
+  inspect Line Protocol health and statistics, and retrieve MessagePack
+  protocol specifications and decoder/buffer statistics. Responses are raw
+  server-defined JSON; administrative flush remains out of scope.
 - **Edge sync administration** (`client.edge_sync`):
   - Hub: spoke registry and air-gap bundle import.
   - Spoke: status, ledger, sync, requeue/dismiss, and bundle export/ack.

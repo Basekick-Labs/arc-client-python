@@ -375,6 +375,30 @@ async def main():
 asyncio.run(main())
 ```
 
+## Write Protocol Diagnostics
+
+Inspect the health and runtime counters of the Line Protocol and MessagePack
+writers. These read-only endpoints require an authenticated token.
+
+```python
+# Synchronous
+health = client.write_diagnostics.line_protocol_health()
+line_stats = client.write_diagnostics.line_protocol_stats()
+msgpack_spec = client.write_diagnostics.msgpack_spec()
+msgpack_stats = client.write_diagnostics.msgpack_stats()
+
+# Asynchronous equivalents
+async with AsyncArcClient(host="localhost", token="your-token") as async_client:
+    health = await async_client.write_diagnostics.line_protocol_health()
+    line_stats = await async_client.write_diagnostics.line_protocol_stats()
+    msgpack_spec = await async_client.write_diagnostics.msgpack_spec()
+    msgpack_stats = await async_client.write_diagnostics.msgpack_stats()
+```
+
+The methods return the server's JSON response unchanged. They are available on
+Arc 26.09.3 and later. The administrative Line Protocol flush endpoint
+is intentionally not included in this read-only diagnostics interface.
+
 ## Management Operations
 
 ### Retention Policies
