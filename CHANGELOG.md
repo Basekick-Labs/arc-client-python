@@ -79,6 +79,11 @@ plus bug fixes and the first real HTTP-layer test coverage.
   `ARC_CLIENT_SEND_INSTALLATION_ID=0` or `send_installation_id=False`; pin the
   ID in containers with `ARC_CLIENT_INSTALLATION_ID`. See README, "Privacy".
 
+- **Scheduler management** (`client.schedulers`, sync + async): inspect CQ and retention
+  scheduler status, reload active continuous-query schedules, and manually trigger
+  retention. The status route accepts authenticated tokens; control routes preserve
+  Arc administrator and enterprise-license gates. Retention triggers require
+  `confirm=True` because they may permanently delete data. Supported by Arc 26.09.3 and later.
 - Arrow completion metadata in the existing `pyarrow.Table` schema for sync and
   async queries: policy cap and execution time are retained; failed, malformed,
   conflicting or unobservable announced completion metadata is rejected.
@@ -108,7 +113,7 @@ plus bug fixes and the first real HTTP-layer test coverage.
   connection/transport failures, 429 (honoring `Retry-After`) and 503. Mutations
   retry only connection establishment; data DELETE never retries. Configure
   via `max_retries` / `retry_backoff`.
-- New exceptions: `ArcNotSupportedError` (501) and `ArcLicenseError` (403 for a
+- New exceptions: `ArcNotSupportedError` (501) and `ArcLicenseError` (403/503 for a
   missing enterprise-license feature; subclass of `ArcAuthenticationError`).
 - `ArcPermissionError` (403: the token lacks the permission the endpoint
   requires), `ArcScopedAccessError` (403 from Arc's per-database check: the

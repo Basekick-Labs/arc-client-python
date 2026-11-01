@@ -132,7 +132,7 @@ def _raise_response_error(response: httpx.Response) -> None:
     Raises:
         ArcAuthenticationError: HTTP 401 — the token is missing, invalid or
             expired. Re-authenticate.
-        ArcLicenseError: HTTP 403 naming an enterprise license.
+        ArcLicenseError: HTTP 403 or 503 naming an enterprise license.
         ArcScopedAccessError: HTTP 403 from Arc's per-database permission
             check — the token may read, but not the database asked for. A
             subclass of ``ArcPermissionError``; carries ``database``.
@@ -202,6 +202,12 @@ def _raise_response_error(response: httpx.Response) -> None:
         raise ArcRateLimitError(f"Rate limit exceeded: {message}")
     elif status_code == 501:
         raise ArcNotSupportedError(f"Operation not supported by server: {message}")
+    elif (
+        status_code == 503
+        and isinstance(message, str)
+        and "license required" in message.lower()
+    ):
+        raise ArcLicenseError(f"Enterprise license required: {message}")
     elif (refusal := ingest_refusal(response)) is not None:
         reason, retry_safe = refusal
         raise ArcIngestRefusedError(

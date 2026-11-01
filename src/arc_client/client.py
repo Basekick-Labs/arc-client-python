@@ -101,6 +101,7 @@ class ArcClient:
         self._edge_sync: Any = None
         self._diagnostics: Any = None
         self._reconciliation: Any = None
+        self._schedulers: Any = None
 
     def _get_http(self) -> SyncHTTPClient:
         """Get or create the HTTP client."""
@@ -256,6 +257,15 @@ class ArcClient:
 
             self._backup = BackupClient(self._get_http(), self._config)
         return self._backup
+
+    @property
+    def schedulers(self) -> Any:
+        """Get the scheduler inspection and control client."""
+        if self._schedulers is None:
+            from arc_client.management.schedulers import SchedulerClient
+
+            self._schedulers = SchedulerClient(self._get_http(), self._config)
+        return self._schedulers
 
     @property
     def mqtt(self) -> Any:
