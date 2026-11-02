@@ -40,15 +40,82 @@ class ArcAuthenticationError(ArcError):
 
 
 class ArcQueryError(ArcError):
-    """Query execution failed."""
+    """Query execution failed.
 
-    pass
+    Attributes:
+        status_code: The HTTP status Arc answered with when the failure was an
+            HTTP error without a more specific exception (e.g. 400 for invalid
+            SQL, 500, or a 503 that outlasted the retries). ``None`` otherwise.
+    """
+
+    def __init__(self, message: str, status_code: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class ArcIngestionError(ArcError):
-    """Data ingestion failed."""
+    """Data ingestion failed.
 
-    pass
+    Attributes:
+        status_code: The HTTP status Arc answered with, when there was one.
+    """
+
+    def __init__(self, message: str, status_code: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class ArcPartialWriteError(ArcIngestionError):
+    """Arc dropped some points of a write (HTTP 400 "partial write").
+
+    Arc 2027.01 drops individual points it cannot store (a value of the wrong
+    type for its column, a tag or field named ``time``, a name Arc could not
+    read back) and still writes the rest of the request, answering
+    ``400 "partial write: N points dropped: ..."``.
+
+    The request has been applied as far as Arc could apply it, so it must
+    **not** be resent: resending would duplicate every point that was stored.
+    The SDK never retries it, and a buffered writer discards the batch and
+    reports this error once.
+
+    Attributes:
+        dropped: Number of points Arc dropped.
+        others_written: ``True`` when Arc reported that the other points of the
+            request were written; ``False`` when every point was dropped and
+            nothing was stored. Arc does not report an accepted-point count.
+    """
+
+    def __init__(self, message: str, dropped: int, others_written: bool) -> None:
+        super().__init__(message, status_code=400)
+        self.dropped = dropped
+        self.others_written = others_written
+
+
+class ArcIngestRefusedError(ArcIngestionError):
+    """Arc refused a write with HTTP 503 before (or while) applying it.
+
+    Raised for a 503 that carries ``X-Arc-Ingest-Fenced`` (this node is not the
+    available primary writer, e.g. during a failover) or
+    ``X-Arc-Ingest-Refused: <reason>`` (a node-local, transient condition such
+    as ``wal_disk``, WAL volume disk pressure). Arc documents these as "nothing
+    was written, retry", and the SDK resends them automatically up to
+    ``max_retries``; this error means the retries ran out.
+
+    The exception is reason ``wal_not_durable`` (``wal.ack_mode = "durable"``
+    could not make the WAL entry durable): earlier parts of the same request
+    may already be stored, so a resend may duplicate rows. The SDK never
+    retries it, and ``retry_safe`` is ``False``.
+
+    Attributes:
+        reason: Arc's refusal reason (``"fenced"`` for a fence, otherwise the
+            ``X-Arc-Ingest-Refused`` value such as ``"wal_disk"``).
+        retry_safe: Whether Arc guarantees nothing of the request was applied.
+    """
+
+    def __init__(self, message: str, reason: str, retry_safe: bool) -> None:
+        super().__init__(message, status_code=503)
+        self.reason = reason
+        self.retry_safe = retry_safe
 
 
 class ArcValidationError(ArcError):
