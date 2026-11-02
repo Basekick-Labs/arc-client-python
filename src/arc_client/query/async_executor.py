@@ -63,9 +63,10 @@ class AsyncQueryClient:
         This method returns structured JSON data. For large result sets,
         consider using query_arrow() or query_polars() for better performance.
 
-        Queries only read, so a 429 or 503 (Arc's replication catch-up gate, a
+        Queries only read, so a 503 (Arc's replication catch-up gate, a
         partition removed mid-query, an unavailable cold tier) is retried with
-        backoff, honoring ``Retry-After``, up to ``max_retries``.
+        backoff, honoring ``Retry-After``, up to ``max_retries``. A governance
+        429 (rate limit or quota) is raised at once as ``ArcRateLimitError``.
 
         Args:
             sql: SQL query to execute.

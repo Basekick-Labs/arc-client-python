@@ -33,9 +33,15 @@ USER_AGENT = user_agent()
 
 
 def build_headers(
-    config: ClientConfig, extra_headers: Optional[dict[str, str]] = None
+    config: ClientConfig,
+    extra_headers: Optional[dict[str, str]] = None,
+    installation_id: Optional[str] = None,
 ) -> dict[str, str]:
-    """Build request headers with authentication."""
+    """Build request headers with authentication.
+
+    ``installation_id`` is resolved once per HTTP client (see
+    ``arc_client._installation``) and omitted when None.
+    """
     headers: dict[str, str] = {
         "User-Agent": USER_AGENT,
     }
@@ -43,7 +49,6 @@ def build_headers(
         headers["Authorization"] = f"Bearer {config.token}"
     if config.database:
         headers["x-arc-database"] = config.database
-    installation_id = outbound_installation_id(config.send_installation_id)
     if installation_id:
         headers[HEADER_INSTALLATION_ID] = installation_id
     if extra_headers:
@@ -316,6 +321,9 @@ class HTTPClientBase:
     def __init__(self, config: ClientConfig) -> None:
         self.config = config
         self._base_url = config.base_url
+        # Resolved once: env opt-outs are read when the client is created, and
+        # the first-run file I/O never happens on an event loop.
+        self._installation_id = outbound_installation_id(config.send_installation_id)
 
     def _build_url(self, path: str) -> str:
         """Build full URL from path."""
@@ -329,7 +337,7 @@ class HTTPClientBase:
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Prepare common request kwargs."""
-        request_headers = build_headers(self.config, headers)
+        request_headers = build_headers(self.config, headers, self._installation_id)
         return {
             "headers": request_headers,
             "timeout": self.config.timeout,

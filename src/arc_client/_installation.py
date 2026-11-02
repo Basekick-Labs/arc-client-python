@@ -103,7 +103,12 @@ def _valid(value: str) -> Optional[str]:
 
 
 def _load_or_create() -> str:
-    path = _config_dir() / _FILE_NAME
+    try:
+        # Path.home() raises when no home directory resolves (an arbitrary
+        # container UID without a passwd entry and no HOME).
+        path = _config_dir() / _FILE_NAME
+    except Exception:
+        return str(uuid.uuid4())
     try:
         existing = _valid(path.read_text(encoding="ascii"))
         if existing:
@@ -138,7 +143,11 @@ def installation_id() -> str:
     global _cached_id
     with _lock:
         if _cached_id is None:
-            _cached_id = _load_or_create()
+            try:
+                _cached_id = _load_or_create()
+            except Exception:
+                # Never let identity fail a request (see module docstring).
+                _cached_id = str(uuid.uuid4())
         return _cached_id
 
 

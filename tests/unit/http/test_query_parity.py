@@ -79,20 +79,19 @@ def ok_response(httpx_mock: HTTPXMock, endpoint: str) -> None:
         httpx_mock.add_response(url=url, json=JSON_OK)
 
 
-# --- Bug 1: query POSTs are reads and retry 429/503 ------------------------
+# --- Bug 1: query POSTs are reads and retry 503 (not governance 429) --------
 
 
 @MODES
 @pytest.mark.parametrize("endpoint", list(ENDPOINTS))
-@pytest.mark.parametrize("status", [429, 503])
-async def test_query_post_retries_retryable_status(
-    httpx_mock: HTTPXMock, async_mode: bool, endpoint: str, status: int
+async def test_query_post_retries_503(
+    httpx_mock: HTTPXMock, async_mode: bool, endpoint: str
 ) -> None:
     path, run = ENDPOINTS[endpoint]
     # Arc's replication catch-up gate (query.go checkReplicationReady).
     httpx_mock.add_response(
         url=f"http://h:8000{path}",
-        status_code=status,
+        status_code=503,
         headers={"Retry-After": "0"},
         json={"success": False, "error": "replication_catch_up_in_progress"},
     )
@@ -100,6 +99,22 @@ async def test_query_post_retries_retryable_status(
     async with make_client(async_mode, max_retries=2) as client:
         await call(run(client))
     assert len(httpx_mock.get_requests()) == 2
+
+
+@MODES
+@pytest.mark.parametrize("endpoint", list(ENDPOINTS))
+async def test_query_post_does_not_retry_governance_429(
+    httpx_mock: HTTPXMock, async_mode: bool, endpoint: str
+) -> None:
+    # query.go checkQueryGovernance: 429 with no Retry-After (rate limit or quota).
+    path, run = ENDPOINTS[endpoint]
+    httpx_mock.add_response(
+        url=f"http://h:8000{path}", status_code=429, json={"error": "rate limit exceeded"}
+    )
+    async with make_client(async_mode, max_retries=2) as client:
+        with pytest.raises(ArcRateLimitError):
+            await call(run(client))
+    assert len(httpx_mock.get_requests()) == 1
 
 
 @MODES

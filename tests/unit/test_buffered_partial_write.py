@@ -9,7 +9,7 @@ from typing import Any, Optional
 import pytest
 
 from arc_client import ArcPartialWriteError
-from arc_client.exceptions import ArcServerError
+from arc_client.exceptions import ArcIngestRefusedError, ArcServerError, ArcValidationError
 from arc_client.ingestion.async_buffered import AsyncBufferedWriter
 from arc_client.ingestion.buffered import BufferedWriter
 
@@ -103,7 +103,7 @@ def test_sync_background_partial_is_reported_once_by_next_call() -> None:
         # Wait until the timer has recorded the partial write.
         for _ in range(100):
             with buffer._lock:
-                if buffer._partial_error is not None:
+                if buffer._partial_errors:
                     break
             threading.Event().wait(0.01)
         with pytest.raises(ArcPartialWriteError):
@@ -160,10 +160,91 @@ async def test_async_background_partial_is_reported_once_by_next_call() -> None:
         buffer._buffers["cpu"].append({"time": [1], "v": [1.0]})
         buffer._record_counts["cpu"] += 1
         for _ in range(200):
-            if buffer._partial_error is not None:
+            if buffer._partial_errors:
                 break
             await asyncio.sleep(0.01)
         with pytest.raises(ArcPartialWriteError):
             await buffer.write({**ROW, "timestamp": 2})
         await buffer.write({**ROW, "timestamp": 3})
     assert [c[1]["time"] for c in fake.calls] == [[1], [3]]
+
+
+# --- Review fixes: no lost partials, retry-safe refusals, tag validation -----
+
+
+def refused(retry_safe: bool = True) -> ArcIngestRefusedError:
+    return ArcIngestRefusedError("refused", reason="fenced", retry_safe=retry_safe)
+
+
+def make(async_mode: bool, fail: dict[int, BaseException]) -> tuple[Any, Any]:
+    if async_mode:
+        fake: Any = AsyncFakeWriter(fail)
+        return fake, AsyncBufferedWriter(fake, batch_size=100, flush_interval=3600)
+    fake = FakeWriter(fail)
+    return fake, BufferedWriter(fake, batch_size=100, flush_interval=3600)
+
+
+async def run(result: Any) -> Any:
+    return await result if asyncio.iscoroutine(result) else result
+
+
+@pytest.mark.parametrize("async_mode", [False, True])
+async def test_partial_survives_a_later_failure_in_the_same_flush(async_mode: bool) -> None:
+    # cpu: partial write (discarded); mem: server error (terminal).
+    fake, buffer = make(async_mode, {0: partial(), 1: ArcServerError("boom", status_code=500)})
+    await run(buffer.write(ROW))
+    await run(buffer.write({**ROW, "measurement": "mem"}))
+
+    with pytest.raises(ArcPartialWriteError):
+        await run(buffer.flush())
+    with pytest.raises(ArcServerError):
+        await run(buffer.flush())
+
+
+@pytest.mark.parametrize("async_mode", [False, True])
+async def test_several_partials_are_folded_into_one(async_mode: bool) -> None:
+    fake, buffer = make(async_mode, {0: partial(), 1: partial()})
+    await run(buffer.write(ROW))
+    await run(buffer.write({**ROW, "measurement": "mem"}))
+
+    with pytest.raises(ArcPartialWriteError) as info:
+        await run(buffer.flush())
+    assert info.value.dropped == 2
+    await run(buffer.flush())  # reported once
+
+
+@pytest.mark.parametrize("async_mode", [False, True])
+async def test_retry_safe_refusal_keeps_batch_and_writer(async_mode: bool) -> None:
+    fake, buffer = make(async_mode, {0: refused()})
+    await run(buffer.write(ROW))
+
+    with pytest.raises(ArcIngestRefusedError):
+        await run(buffer.flush())
+    assert buffer.pending_count == 1
+
+    await run(buffer.flush())  # resent, accepted
+    assert buffer.pending_count == 0
+    await run(buffer.close())
+    assert [c[1]["time"] for c in fake.calls] == [[1], [1]]
+
+
+@pytest.mark.parametrize("async_mode", [False, True])
+async def test_unsafe_refusal_is_terminal(async_mode: bool) -> None:
+    fake, buffer = make(async_mode, {0: refused(retry_safe=False)})
+    await run(buffer.write(ROW))
+    for _ in range(2):
+        with pytest.raises(ArcIngestRefusedError):
+            await run(buffer.flush())
+    assert len(fake.calls) == 1
+
+
+@pytest.mark.parametrize("async_mode", [False, True])
+async def test_bad_tag_is_rejected_before_buffering(async_mode: bool) -> None:
+    fake, buffer = make(async_mode, {})
+    with pytest.raises(ArcValidationError):
+        await run(buffer.write({**ROW, "tags": {"time": "x"}}))
+    assert buffer.pending_count == 0
+
+    await run(buffer.write(ROW))  # writer is still usable
+    await run(buffer.close())
+    assert len(fake.calls) == 1

@@ -106,10 +106,10 @@ class ArcIngestRefusedError(ArcIngestionError):
     may already be stored, so a resend may duplicate rows. The SDK never
     retries it, and ``retry_safe`` is ``False``.
 
-    A refusal of a body spanning several measurements (multi-measurement line
-    protocol, row-format records) is also never resent and has
-    ``retry_safe=False``: Arc re-checks its fence per measurement, so the
-    refusal may follow measurements it already stored.
+    A refusal of a line-protocol body spanning several measurements is also
+    never resent and has ``retry_safe=False``: Arc re-checks its fence per
+    measurement there, so the refusal may follow measurements it already
+    stored. MessagePack writes are checked once per request and are resent.
 
     Attributes:
         reason: Arc's refusal reason (``"fenced"`` for a fence, otherwise the

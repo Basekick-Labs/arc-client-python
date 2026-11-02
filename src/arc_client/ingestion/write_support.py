@@ -53,23 +53,33 @@ def single_lp_measurement(data: bytes) -> bool:
     return True
 
 
-def single_record_measurement(records: list[dict[str, Any]]) -> bool:
-    """True when every row-format record targets the same measurement (see above)."""
-    return len({r.get("measurement") for r in records}) <= 1
-
-
 def refusal_without_resend(error: ArcIngestRefusedError) -> ArcIngestRefusedError:
     """Re-issue a refusal for a multi-measurement body as not safe to resend."""
     if not error.retry_safe:
         return error
     refused = ArcIngestRefusedError(
-        f"{error} (not resent: the request spans several measurements, and Arc "
+        f"{error} (not resent: the line-protocol body spans several measurements, and Arc "
         "may have stored the ones before the refusal)",
         reason=error.reason,
         retry_safe=False,
     )
     refused.__cause__ = error
     return refused
+
+
+def combine_partial_writes(errors: list[ArcPartialWriteError]) -> ArcPartialWriteError:
+    """Fold the partial writes of several buffered batches into one error."""
+    if len(errors) == 1:
+        return errors[0]
+    dropped = sum(e.dropped for e in errors)
+    combined = ArcPartialWriteError(
+        f"Arc dropped {dropped} point(s) across {len(errors)} buffered batches: "
+        + "; ".join(str(e) for e in errors),
+        dropped=dropped,
+        others_written=any(e.others_written for e in errors),
+    )
+    combined.__cause__ = errors[0]
+    return combined
 
 
 def validate_precision(precision: Optional[str]) -> Optional[str]:

@@ -134,3 +134,14 @@ def test_user_agent_shape() -> None:
     # Arc keeps only printable ASCII up to 32 chars per field.
     for part in m.groups():
         assert 0 < len(part) <= 32 and part.isascii() and part.isprintable()
+
+
+def test_unresolvable_home_never_fails_a_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("XDG_CONFIG_HOME")
+    monkeypatch.delenv("APPDATA")
+
+    def no_home() -> Path:
+        raise RuntimeError("Could not determine home directory.")
+
+    monkeypatch.setattr(Path, "home", staticmethod(no_home))
+    assert UUID_RE.match(_installation.installation_id())

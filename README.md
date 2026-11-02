@@ -173,8 +173,8 @@ except ArcIngestRefusedError as e:  # retries exhausted, or unsafe to resend
 Arc refuses writes with a 503 during failover or under disk pressure. The SDK
 resends single-measurement writes that Arc reports as "nothing was written".
 It never resends a partial write, a `wal_not_durable` refusal, or a refusal
-of a body spanning several measurements: Arc may already have stored part of
-those.
+of a line-protocol body spanning several measurements: Arc may already have
+stored part of those.
 
 ## Bulk Import
 

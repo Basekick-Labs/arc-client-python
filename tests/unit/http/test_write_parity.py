@@ -95,19 +95,16 @@ def write_records_multi(client: Any) -> Any:
 
 @MODES
 @pytest.mark.parametrize(
-    "write",
-    [pytest.param(write_lp_multi, id="lp"), pytest.param(write_records_multi, id="records")],
-)
-@pytest.mark.parametrize(
     "headers",
     [
         pytest.param({"X-Arc-Ingest-Refused": "wal_disk"}, id="wal_disk"),
         pytest.param({"X-Arc-Ingest-Fenced": "1"}, id="fenced"),
     ],
 )
-async def test_multi_measurement_refusal_is_not_resent(
-    httpx_mock: HTTPXMock, async_mode: bool, write: Any, headers: dict[str, str]
+async def test_multi_measurement_lp_refusal_is_not_resent(
+    httpx_mock: HTTPXMock, async_mode: bool, headers: dict[str, str]
 ) -> None:
+    write = write_lp_multi
     # Arc re-checks the fence per measurement (ingest.checkIngestGate), so the
     # refusal may follow measurements it already buffered: a resend duplicates.
     httpx_mock.add_response(
@@ -121,6 +118,21 @@ async def test_multi_measurement_refusal_is_not_resent(
     assert info.value.retry_safe is False
     assert "several measurements" in str(info.value)
     assert len(httpx_mock.get_requests()) == 1
+
+
+@MODES
+async def test_multi_measurement_records_refusal_is_resent(
+    httpx_mock: HTTPXMock, async_mode: bool
+) -> None:
+    # The msgpack path checks the fence once for the whole batch
+    # (arrow_writer.go ArrowBuffer.Write): nothing was applied.
+    httpx_mock.add_response(
+        status_code=503, headers={"X-Arc-Ingest-Fenced": "1", "Retry-After": "0"}, json={}
+    )
+    httpx_mock.add_response(status_code=204)
+    async with make_client(async_mode, max_retries=2, **client_kwargs()) as client:
+        await call(write_records_multi(client))
+    assert len(httpx_mock.get_requests()) == 2
 
 
 @pytest.mark.parametrize(

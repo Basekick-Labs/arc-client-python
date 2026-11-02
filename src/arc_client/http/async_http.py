@@ -60,7 +60,7 @@ class AsyncHTTPClient(HTTPClientBase):
         Reads (GET/HEAD/OPTIONS) retry transient transport failures and
         429/503 responses up to ``config.max_retries`` times. Requests the
         caller marks ``idempotent=True`` (Arc's query POSTs, which only read)
-        retry 429/503 like a read; for transport failures they keep the
+        retry 503 (not 429, see below); for transport failures they keep the
         mutation rule (only connection establishment failures), because a
         timeout or a connection lost mid-response means Arc already ran the
         query, and silently re-running it would multiply its cost and hide a
@@ -97,8 +97,11 @@ class AsyncHTTPClient(HTTPClientBase):
             if retry_if is not None:
                 retry_status = retry_if(response)
             else:
-                retry_status = (read_only or idempotent) and is_retryable_status(
-                    response.status_code
+                # Idempotent POSTs (queries) retry only 503: Arc's query 429
+                # is governance (rate limit or quota) with no Retry-After, and
+                # does not clear within a few seconds of backoff.
+                retry_status = (read_only and is_retryable_status(response.status_code)) or (
+                    idempotent and response.status_code == 503
                 )
             if retry_status and attempt < self.config.max_retries:
                 retry_after = parse_retry_after(response)

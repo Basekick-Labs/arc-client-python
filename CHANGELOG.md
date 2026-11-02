@@ -17,10 +17,10 @@ plus bug fixes and the first real HTTP-layer test coverage.
     `400 "partial write"`. It is never retried, and buffered writers discard
     that batch and report it once, so a resend cannot duplicate stored rows.
   - `ArcIngestRefusedError` (`reason`, `retry_safe`) for 503 refusals
-    (`X-Arc-Ingest-Fenced`, `X-Arc-Ingest-Refused`). Single-measurement
-    writes are resent automatically except for `wal_not_durable`. Bodies
-    spanning several measurements are never resent, because Arc re-checks
-    its fence per measurement.
+    (`X-Arc-Ingest-Fenced`, `X-Arc-Ingest-Refused`). Writes are resent
+    automatically except for `wal_not_durable` and line-protocol bodies
+    spanning several measurements, where Arc re-checks its fence per
+    measurement. A buffered writer keeps a refused batch and stays usable.
   - `precision=` on `write_line_protocol`/`write_point`.
   - `tag_columns=` on `write_columnar`/`write_dataframe` and buffered writes,
     sent as msgpack `tag_keys`.
@@ -149,7 +149,7 @@ plus bug fixes and the first real HTTP-layer test coverage.
 ### Fixed
 
 - Query POSTs (`query`, `query_arrow`, `query_msgpack`, `estimate`) now retry
-  429/503 with `Retry-After`. Arc sends these during replication catch-up,
+  503 with `Retry-After`. A governance 429 is raised at once. Arc sends these during replication catch-up,
   for a vanished partition, and when the cold tier is unavailable. A
   transport failure mid-response is still not replayed.
 - Query and write clients no longer hide typed errors. Auth, permission,
