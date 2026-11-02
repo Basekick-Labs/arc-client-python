@@ -20,7 +20,8 @@ class DeleteResponse(BaseModel):
         files_processed: List of processed file names.
         failed_files: Files whose deletion could not be completed.
         unreachable_files: Manifest files unavailable on this node.
-        unflushed_nodes: Nodes whose buffered rows could not be flushed.
+        unflushed_nodes: Nodes whose buffered rows could not be flushed, one
+            message per node naming it and why (not a bare node id).
         cold_deleted_files: Whole cold files deleted or selected by a dry run.
         cold_files: Partially matching cold files left unchanged.
         cold_rows_not_deleted: Matching rows left in cold storage.
