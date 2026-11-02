@@ -4,7 +4,30 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class QueryProfile(BaseModel):
+    """Server-side timing for one query, returned when ``profile=True``.
+
+    Mirrors Arc's ``database.QueryProfile``. Extra keys a newer server adds
+    are kept rather than dropped.
+
+    Attributes:
+        total_ms: Total server-side time in milliseconds.
+        planner_ms: Planning time in milliseconds.
+        execution_ms: Execution time in milliseconds.
+        rows_scanned: Rows DuckDB scanned.
+        latency_ms: Latency DuckDB itself reported, in milliseconds.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    total_ms: float = 0.0
+    planner_ms: float = 0.0
+    execution_ms: float = 0.0
+    rows_scanned: int = 0
+    latency_ms: float = 0.0
 
 
 class QueryResponse(BaseModel):
@@ -15,13 +38,23 @@ class QueryResponse(BaseModel):
         columns: List of column names in the result.
         data: List of rows, where each row is a list of values.
         row_count: Number of rows returned.
-        truncated: Whether the result was cut short by a query failure.
+        truncated: Whether the result was cut short by a query failure. Arc's
+            JSON writer sets it when a stream fails after its headers were
+            sent. Arc's MessagePack writer never sends it: a msgpack stream
+            that fails part way arrives as an incomplete body, which
+            ``query_msgpack`` raises as :class:`ArcQueryError` instead of
+            returning partial rows.
         truncation_reason: Reason the result was truncated, if available.
         rows_capped: Whether the result reached a configured row cap.
         row_cap: Configured row cap, if available.
         execution_time_ms: Query execution time in milliseconds.
         timestamp: Server timestamp when the query was executed.
         error: Error message if the query failed.
+        profile: Server-side timing, present when the query asked for it with
+            ``profile=True``.
+        query_id: Arc's ID for this query (``X-Arc-Query-ID``), usable with
+            ``client.queries`` to look it up or cancel it. ``None`` when the
+            server does not run the query registry.
     """
 
     success: bool
@@ -37,6 +70,8 @@ class QueryResponse(BaseModel):
     error: Optional[str] = None
     # Parallel to ``columns``: Arrow type name per column, when supplied.
     types: list[str] = Field(default_factory=list)
+    profile: Optional[QueryProfile] = None
+    query_id: Optional[str] = None
 
 
 class EstimateResponse(BaseModel):
