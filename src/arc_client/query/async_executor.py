@@ -197,7 +197,7 @@ class AsyncQueryClient:
         except ImportError as e:
             raise ImportError(
                 "pandas is required for query_pandas(). "
-                "Install it with: pip install arc-client[pandas]"
+                "Install it with: pip install arc-tsdb-client[pandas]"
             ) from e
 
         table = await self.query_arrow(
@@ -238,7 +238,7 @@ class AsyncQueryClient:
         except ImportError as e:
             raise ImportError(
                 "polars is required for query_polars(). "
-                "Install it with: pip install arc-client[polars]"
+                "Install it with: pip install arc-tsdb-client[polars]"
             ) from e
 
         table = await self.query_arrow(
