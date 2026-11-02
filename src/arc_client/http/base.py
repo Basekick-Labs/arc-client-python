@@ -282,6 +282,15 @@ def is_retryable_write_refusal(response: httpx.Response) -> bool:
     return refusal is not None and refusal[1]
 
 
+def retry_unavailable_only(response: httpx.Response) -> bool:
+    """Status-retry predicate for governed reads: retry 503, never 429.
+
+    Arc's query governance answers 429 (rate limit or quota) with no
+    Retry-After, and it does not clear within a few seconds of backoff.
+    """
+    return response.status_code == 503
+
+
 def never_retry_status(response: httpx.Response) -> bool:
     """Status-retry predicate that disables status retries for one request."""
     return False

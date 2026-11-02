@@ -34,6 +34,7 @@ from urllib.parse import quote
 
 from arc_client.config import ClientConfig
 from arc_client.exceptions import ArcError, ArcValidationError
+from arc_client.http.base import never_retry_status
 from arc_client.http.sync_http import SyncHTTPClient
 from arc_client.models.edge_sync import Spoke, SpokeSecret
 
@@ -142,14 +143,16 @@ class EdgeSyncClient:
         """Get one registered spoke (hub). 404 if not registered."""
         return Spoke.model_validate(self._dict("get", f"{SPOKES}/{_segment('spoke_id', spoke_id)}"))
 
-    def register_spoke(self, spoke_id: str, name: str = "") -> SpokeSecret:
+    def register_spoke(self, spoke_id: str, name: Optional[str] = None) -> SpokeSecret:
         """Register a spoke and get its HMAC secret (hub).
 
         The secret is returned only this once; store it before discarding the
         result. 409 if the ID is already registered (Arc refuses to reissue).
+        ``name`` defaults to ``spoke_id``: Arc requires a non-empty name
+        (internal/edgesync/registry.go).
         """
         _segment("spoke_id", spoke_id)
-        body = {"spoke_id": spoke_id, "name": name}
+        body = {"spoke_id": spoke_id, "name": name or spoke_id}
         return SpokeSecret.model_validate(self._dict("post", f"{SPOKES}/", json=body))
 
     def rotate_spoke_secret(self, spoke_id: str, confirm: bool = False) -> SpokeSecret:
@@ -225,7 +228,7 @@ class EdgeSyncClient:
         ``skipped``, ``pending_bytes`` and, once anything has synced,
         ``last_synced_at`` / ``seconds_since_last_sync``.
         """
-        return self._dict("get", f"{SPOKE_SYNC}/status")
+        return self._dict("get", f"{SPOKE_SYNC}/status", retry_if=never_retry_status)
 
     def spoke_ledger(
         self, limit: Optional[int] = None, state: Optional[str] = None
@@ -237,7 +240,12 @@ class EdgeSyncClient:
         ``exported``, ``failed`` or ``skipped``. ``limit`` is 1-1000 (server
         default 100).
         """
-        return self._dict("get", f"{SPOKE_SYNC}/ledger", params=_ledger_params(limit, state))
+        return self._dict(
+            "get",
+            f"{SPOKE_SYNC}/ledger",
+            params=_ledger_params(limit, state),
+            retry_if=never_retry_status,
+        )
 
     def run_sync(self) -> dict[str, Any]:
         """Run one network sync pass now and wait for its result (spoke).

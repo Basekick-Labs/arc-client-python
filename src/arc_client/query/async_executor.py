@@ -15,6 +15,7 @@ from arc_client.exceptions import (
     ArcValidationError,
 )
 from arc_client.http.async_http import AsyncHTTPClient
+from arc_client.http.base import retry_unavailable_only
 from arc_client.models.query import EstimateResponse, MeasurementInfo, QueryResponse
 from arc_client.query.arrow_response import QUERY_ID_HEADER, decode_arrow_response
 from arc_client.query.msgpack_response import decode_msgpack_query_response
@@ -440,7 +441,13 @@ class AsyncQueryClient:
             measurement, database or self._config.database, limit, offset, order_by, where
         )
         try:
-            response = await self._http.get(f"/api/v1/query/{measurement}", params=params)
+            response = await self._http.get(
+                f"/api/v1/query/{measurement}",
+                params=params,
+                # Governed like the query POSTs: a 429 is a rate limit or
+                # quota (query.go checkQueryGovernance), not worth retrying.
+                retry_if=retry_unavailable_only,
+            )
             return query_response_from_json(response)
         except (ArcServerError, ArcConnectionError) as e:
             raise ArcQueryError(f"Query failed: {e}", status_code=_status(e)) from e

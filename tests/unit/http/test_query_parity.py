@@ -410,3 +410,24 @@ async def test_compressed_query_responses_decode(async_mode: bool, wire: str) ->
         server.server_close()
     assert result.data == [["a", 1]]
     assert "gzip" in _CompressingHandler.seen[-1]
+
+
+@MODES
+async def test_query_measurement_governance_429_not_retried(
+    httpx_mock: HTTPXMock, async_mode: bool
+) -> None:
+    # Found live: as a GET it used to retry Arc's governance 429 (5 requests).
+    httpx_mock.add_response(status_code=429, json={"error": "rate limit exceeded"})
+    async with make_client(async_mode, max_retries=3) as client:
+        with pytest.raises(ArcRateLimitError):
+            await call(client.query.query_measurement("cpu"))
+    assert len(httpx_mock.get_requests()) == 1
+
+
+@MODES
+async def test_query_measurement_retries_503(httpx_mock: HTTPXMock, async_mode: bool) -> None:
+    httpx_mock.add_response(status_code=503, headers={"Retry-After": "0"}, json={})
+    httpx_mock.add_response(json=JSON_OK)
+    async with make_client(async_mode, max_retries=2) as client:
+        await call(client.query.query_measurement("cpu"))
+    assert len(httpx_mock.get_requests()) == 2

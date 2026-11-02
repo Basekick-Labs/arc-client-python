@@ -177,3 +177,19 @@ async def test_get_run_requires_id(httpx_mock: HTTPXMock, async_mode: bool) -> N
         client = await enter_client(stack, async_mode)
         with pytest.raises(ArcValidationError):
             await call(client, "get_run", "")
+
+
+async def test_get_run_does_not_retry_permanent_503(
+    httpx_mock: HTTPXMock, async_mode: bool
+) -> None:
+    # Found live: standalone Arc answers 503 "not running" with no Retry-After.
+    httpx_mock.add_response(status_code=503, json={"error": "reconciliation is not running"})
+    async with AsyncExitStack() as stack:
+        client = (
+            await stack.enter_async_context(AsyncArcClient(token="t", max_retries=3))
+            if async_mode
+            else stack.enter_context(ArcClient(token="t", max_retries=3))
+        )
+        with pytest.raises(ArcServerError):
+            await call(client, "get_run", 7)
+    assert len(httpx_mock.get_requests()) == 1
