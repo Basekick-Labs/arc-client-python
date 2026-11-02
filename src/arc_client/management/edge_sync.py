@@ -226,7 +226,9 @@ class EdgeSyncClient:
 
         ``pending``, ``in_flight``, ``exported``, ``synced``, ``failed``,
         ``skipped``, ``pending_bytes`` and, once anything has synced,
-        ``last_synced_at`` / ``seconds_since_last_sync``.
+        ``last_synced_at`` / ``seconds_since_last_sync``. Files are entered
+        in the ledger by a sync or export pass, so ``pending`` stays 0 for
+        new data until one runs.
         """
         return self._dict("get", f"{SPOKE_SYNC}/status", retry_if=never_retry_status)
 

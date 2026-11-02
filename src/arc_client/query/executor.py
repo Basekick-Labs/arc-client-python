@@ -277,7 +277,10 @@ class QueryClient:
             dictionary: Ask Arc to dictionary-encode low-cardinality string
                 columns (``x-arc-arrow-dictionary: true``); those columns
                 arrive as ``dictionary<int32, utf8>``. Smaller on the wire for
-                repetitive tags.
+                repetitive tags. Arc decides per column: only results of at
+                least 256 rows, and columns with at most rows/4 (and 4096)
+                distinct values, are encoded; otherwise columns stay plain
+                ``utf8`` (internal/api/query_arrow_dict.go).
             compression: Arrow IPC buffer compression, ``"zstd"`` or ``"lz4"``
                 (``x-arc-arrow-compression``), decoded transparently by
                 pyarrow. ``None`` (default) sends uncompressed buffers.
