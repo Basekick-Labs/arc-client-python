@@ -91,6 +91,7 @@ class ArcClient:
         self._tiering: Any = None
         self._backup: Any = None
         self._mqtt: Any = None
+        self._diagnostics: Any = None
         self._reconciliation: Any = None
 
     def _get_http(self) -> SyncHTTPClient:
@@ -265,6 +266,15 @@ class ArcClient:
 
             self._reconciliation = ReconciliationClient(self._get_http(), self._config)
         return self._reconciliation
+
+    @property
+    def diagnostics(self) -> Any:
+        """Get the operational diagnostics client (readiness, metrics, logs, memory)."""
+        if self._diagnostics is None:
+            from arc_client.management.diagnostics import DiagnosticsClient
+
+            self._diagnostics = DiagnosticsClient(self._get_http(), self._config)
+        return self._diagnostics
 
     def health(self) -> HealthResponse:
         """Check server health.

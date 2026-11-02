@@ -91,6 +91,7 @@ class AsyncArcClient:
         self._tiering: Any = None
         self._backup: Any = None
         self._mqtt: Any = None
+        self._diagnostics: Any = None
         self._reconciliation: Any = None
 
     def _get_http(self) -> AsyncHTTPClient:
@@ -267,6 +268,15 @@ class AsyncArcClient:
 
             self._reconciliation = AsyncReconciliationClient(self._get_http(), self._config)
         return self._reconciliation
+
+    @property
+    def diagnostics(self) -> Any:
+        """Get the async operational diagnostics client (readiness, metrics, logs, memory)."""
+        if self._diagnostics is None:
+            from arc_client.management.async_diagnostics import AsyncDiagnosticsClient
+
+            self._diagnostics = AsyncDiagnosticsClient(self._get_http(), self._config)
+        return self._diagnostics
 
     async def health(self) -> HealthResponse:
         """Check server health.
