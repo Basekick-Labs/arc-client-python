@@ -80,6 +80,67 @@ async def test_safe_refusal_is_resent(
     assert requests[0].content == requests[1].content
 
 
+def write_lp_multi(client: Any) -> Any:
+    return client.write.write_line_protocol(["cpu,host=a v=1i", "mem,host=a used=2i"])
+
+
+def write_records_multi(client: Any) -> Any:
+    return client.write.write_records(
+        [
+            {"measurement": "cpu", "fields": {"v": 1}},
+            {"measurement": "mem", "fields": {"used": 2}},
+        ]
+    )
+
+
+@MODES
+@pytest.mark.parametrize(
+    "write",
+    [pytest.param(write_lp_multi, id="lp"), pytest.param(write_records_multi, id="records")],
+)
+@pytest.mark.parametrize(
+    "headers",
+    [
+        pytest.param({"X-Arc-Ingest-Refused": "wal_disk"}, id="wal_disk"),
+        pytest.param({"X-Arc-Ingest-Fenced": "1"}, id="fenced"),
+    ],
+)
+async def test_multi_measurement_refusal_is_not_resent(
+    httpx_mock: HTTPXMock, async_mode: bool, write: Any, headers: dict[str, str]
+) -> None:
+    # Arc re-checks the fence per measurement (ingest.checkIngestGate), so the
+    # refusal may follow measurements it already buffered: a resend duplicates.
+    httpx_mock.add_response(
+        status_code=503,
+        headers={**headers, "Retry-After": "0"},
+        json={"error": "Write rejected (retry)"},
+    )
+    async with make_client(async_mode, max_retries=3, **client_kwargs()) as client:
+        with pytest.raises(ArcIngestRefusedError) as info:
+            await call(write(client))
+    assert info.value.retry_safe is False
+    assert "several measurements" in str(info.value)
+    assert len(httpx_mock.get_requests()) == 1
+
+
+@pytest.mark.parametrize(
+    ("body", "single"),
+    [
+        (b"cpu,host=a v=1i 1\ncpu v=2i 2\n", True),
+        (b"# comment\n\ncpu v=1i\n", True),
+        (b"cpu,host=a v=1i\nmem v=1i\n", False),
+        (b"my\\ cpu,host=a v=1i\nmy\\ cpu v=2i\n", True),
+        (b"my\\ cpu v=1i\nmy v=2i\n", False),
+        (b"a\\,b v=1i\na v=1i\n", False),
+        (b"", True),
+    ],
+)
+def test_single_lp_measurement(body: bytes, single: bool) -> None:
+    from arc_client.ingestion.write_support import single_lp_measurement
+
+    assert single_lp_measurement(body) is single
+
+
 @MODES
 async def test_safe_refusal_exhausted_reports_reason(
     httpx_mock: HTTPXMock, async_mode: bool

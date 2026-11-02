@@ -18,10 +18,9 @@ from arc_client.exceptions import (
     ArcError,
     ArcPermissionError,
     ArcRateLimitError,
-    ArcServerError,
     ArcValidationError,
 )
-from arc_client.models.diagnostics import ReadinessStatus
+from arc_client.models import ReadyResponse
 
 ROOT = "http://localhost:8000"
 
@@ -42,7 +41,12 @@ async def enter_client(stack: AsyncExitStack, async_mode: bool) -> Any:
     return stack.enter_context(ArcClient(token="t", max_retries=0))
 
 
-# Readiness -----------------------------------------------------------------
+# Readiness lives on the client (client.readiness / write_readiness) --------
+
+
+async def probe(client: Any, write: bool) -> Any:
+    result = client.write_readiness() if write else client.readiness()
+    return await result if inspect.isawaitable(result) else result
 
 
 @pytest.mark.parametrize(("write", "path"), [(False, "/ready"), (True, "/ready/write")])
@@ -53,8 +57,8 @@ async def test_readiness_ready(
     httpx_mock.add_response(method="GET", url=f"{ROOT}{path}", json=body)
     async with AsyncExitStack() as stack:
         client = await enter_client(stack, async_mode)
-        result = await call(client, "readiness", write=write)
-    assert isinstance(result, ReadinessStatus)
+        result = await probe(client, write)
+    assert isinstance(result, ReadyResponse)
     assert result.ready is True
     assert result.uptime_sec == 12.5
 
@@ -73,19 +77,11 @@ async def test_readiness_503_is_an_answer(
     httpx_mock.add_response(status_code=503, json={**body, "time": "2027-01-05T10:00:00Z"})
     async with AsyncExitStack() as stack:
         client = await enter_client(stack, async_mode)
-        result = await call(client, "readiness", write=write)
+        result = await probe(client, write)
     assert result.ready is False
     assert result.status == body["status"]
     assert result.reason == body["reason"]
     assert result.tier == body.get("tier")
-
-
-async def test_readiness_other_503_raises(httpx_mock: HTTPXMock, async_mode: bool) -> None:
-    httpx_mock.add_response(status_code=503, text="upstream unavailable")
-    async with AsyncExitStack() as stack:
-        client = await enter_client(stack, async_mode)
-        with pytest.raises(ArcServerError):
-            await call(client, "readiness")
 
 
 # Metrics -------------------------------------------------------------------

@@ -1,9 +1,10 @@
 """Asynchronous operational-diagnostics client for Arc.
 
-Wraps Arc's readiness probes, JSON metrics, Prometheus metrics, buffered
-application logs, and the admin memory diagnostics under ``/api/v1/debug``.
+Wraps Arc's JSON metrics, Prometheus metrics, buffered application logs, and
+the admin memory diagnostics under ``/api/v1/debug``. Readiness probes live on
+the client itself (``readiness()`` / ``write_readiness()``).
 
-Everything except :meth:`DiagnosticsClient.readiness` returns raw dicts: these
+Everything returns raw dicts: these
 are operator diagnostics whose fields follow Arc's internal counters and Go
 runtime, not a stable contract.
 
@@ -21,20 +22,17 @@ from __future__ import annotations
 from typing import Any, Optional
 
 from arc_client.config import ClientConfig
-from arc_client.exceptions import ArcError, ArcServerError
+from arc_client.exceptions import ArcError
 from arc_client.http.async_http import AsyncHTTPClient
 from arc_client.management.diagnostics import (
     _free_os_memory_guard,
     _logs_params,
-    _readiness_from_error,
-    _readiness_path,
     _timeseries_request,
 )
-from arc_client.models.diagnostics import ReadinessStatus
 
 
 class AsyncDiagnosticsClient:
-    """Readiness, metrics, logs and memory diagnostics."""
+    """Metrics, logs and memory diagnostics."""
 
     def __init__(self, http: AsyncHTTPClient, config: ClientConfig) -> None:
         self._http = http
@@ -51,29 +49,6 @@ class AsyncDiagnosticsClient:
         if not isinstance(data, dict):
             raise ArcError(f"Unexpected response from {path}: {data!r}")
         return data
-
-    # Readiness -----------------------------------------------------------
-
-    async def readiness(self, write: bool = False) -> ReadinessStatus:
-        """Ask whether this node should receive traffic (public).
-
-        ``write=False`` probes ``/ready``: is the node ready at all.
-        ``write=True`` probes ``/ready/write``: should a load balancer send
-        *writes* here. It is strictly narrower — a reader, or a non-primary
-        node in local-storage mode, is ready but answers
-        ``status="not_write_target"``.
-
-        Unlike :meth:`AsyncArcClient.ready`, the reason is kept: a 503 from the
-        probe is returned as a :class:`ReadinessStatus` with ``ready ==
-        False``, not raised. Note that the SDK retries a GET that returns 503
-        up to ``max_retries`` times before answering; construct the client
-        with ``max_retries=0`` for a probe that must answer immediately.
-        """
-        try:
-            data = await self._json("get", _readiness_path(write))
-        except ArcServerError as e:
-            return _readiness_from_error(e)
-        return ReadinessStatus.model_validate(data)
 
     # Metrics -------------------------------------------------------------
 

@@ -6,8 +6,13 @@ from typing import TYPE_CHECKING, Any, Optional, Union
 
 from arc_client.compression import Compression
 from arc_client.config import ClientConfig
-from arc_client.exceptions import ArcError, ArcIngestionError, ArcValidationError
-from arc_client.http.base import is_retryable_write_refusal
+from arc_client.exceptions import (
+    ArcError,
+    ArcIngestionError,
+    ArcIngestRefusedError,
+    ArcValidationError,
+)
+from arc_client.http.base import is_retryable_write_refusal, never_retry_status
 from arc_client.http.sync_http import SyncHTTPClient
 from arc_client.ingestion.compression import compress as compress_data
 from arc_client.ingestion.line_protocol import format_line_protocol
@@ -18,6 +23,9 @@ from arc_client.ingestion.msgpack import (
 )
 from arc_client.ingestion.write_support import (
     as_write_error,
+    refusal_without_resend,
+    single_lp_measurement,
+    single_record_measurement,
     tle_stats_body,
     validate_precision,
 )
@@ -142,7 +150,7 @@ class WriteClient:
         except Exception as e:
             raise ArcValidationError(f"Failed to encode records: {e}") from e
 
-        self._write_msgpack(data, database, compress)
+        self._write_msgpack(data, database, compress, single_record_measurement(records))
 
     def write_dataframe(
         self,
@@ -352,6 +360,7 @@ class WriteClient:
         compress: CompressArg,
         extra_headers: Optional[dict[str, str]] = None,
         params: Optional[dict[str, Any]] = None,
+        resend_refusals: bool = True,
     ) -> None:
         """Compress (if requested) and POST a write payload.
 
@@ -364,6 +373,10 @@ class WriteClient:
         honoring ``Retry-After``. Nothing else is resent: a partial write, a
         ``wal_not_durable`` refusal or any other failure may have stored
         data. Errors are mapped by ``as_write_error``.
+
+        ``resend_refusals=False`` is for bodies spanning several measurements:
+        Arc re-checks its fence per measurement, so a refusal may follow
+        stored measurements. Such a refusal is raised with ``retry_safe=False``.
         """
         codec = self._resolve_codec(compress)
         data = compress_data(data, codec)
@@ -380,10 +393,12 @@ class WriteClient:
                 content=data,
                 headers=headers,
                 params=params,
-                retry_if=is_retryable_write_refusal,
+                retry_if=is_retryable_write_refusal if resend_refusals else never_retry_status,
             )
         except Exception as e:
             mapped = as_write_error(e)
+            if not resend_refusals and isinstance(mapped, ArcIngestRefusedError):
+                mapped = refusal_without_resend(mapped)
             if mapped is e:
                 raise
             raise mapped from e
@@ -399,9 +414,17 @@ class WriteClient:
         data: bytes,
         database: Optional[str],
         compress: CompressArg,
+        resend_refusals: bool = True,
     ) -> None:
         """Send MessagePack data to Arc."""
-        self._post_write("/api/v1/write/msgpack", data, "application/msgpack", database, compress)
+        self._post_write(
+            "/api/v1/write/msgpack",
+            data,
+            "application/msgpack",
+            database,
+            compress,
+            resend_refusals=resend_refusals,
+        )
 
     def _write_line_protocol(
         self,
@@ -418,4 +441,5 @@ class WriteClient:
             database,
             compress,
             params={"precision": precision} if precision else None,
+            resend_refusals=single_lp_measurement(data),
         )

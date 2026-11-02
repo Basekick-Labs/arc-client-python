@@ -9,6 +9,7 @@ from arc_client.exceptions import (
     ArcConnectionError,
     ArcError,
     ArcIngestionError,
+    ArcIngestRefusedError,
     ArcPartialWriteError,
     ArcServerError,
     ArcValidationError,
@@ -23,6 +24,52 @@ LP_PRECISIONS = ("ns", "us", "ms", "s")
 #   "partial write: N points dropped: <reasons>[ the other points were written]"
 _PARTIAL_WRITE_RE = re.compile(r"^\s*partial write:\s*(\d+)\s+points? dropped", re.IGNORECASE)
 _OTHERS_WRITTEN = "the other points were written"
+
+
+# A line-protocol measurement ends at the first unescaped comma or space.
+_LP_MEASUREMENT_RE = re.compile(rb"^((?:[^\\, ]|\\.)+)")
+
+
+def single_lp_measurement(data: bytes) -> bool:
+    """True when every line-protocol line in ``data`` names the same measurement.
+
+    Arc checks its ingest fence once per measurement while writing a request
+    (internal/api/lineprotocol.go handleWrite, ingest.checkIngestGate), so a
+    fenced/refused answer to a multi-measurement body can arrive after earlier
+    measurements were buffered. Only a single-measurement body is resent.
+    """
+    seen: Optional[bytes] = None
+    for raw in data.splitlines():
+        line = raw.strip()
+        if not line or line.startswith(b"#"):
+            continue
+        match = _LP_MEASUREMENT_RE.match(line)
+        if match is None:
+            return False
+        if seen is None:
+            seen = match.group(1)
+        elif match.group(1) != seen:
+            return False
+    return True
+
+
+def single_record_measurement(records: list[dict[str, Any]]) -> bool:
+    """True when every row-format record targets the same measurement (see above)."""
+    return len({r.get("measurement") for r in records}) <= 1
+
+
+def refusal_without_resend(error: ArcIngestRefusedError) -> ArcIngestRefusedError:
+    """Re-issue a refusal for a multi-measurement body as not safe to resend."""
+    if not error.retry_safe:
+        return error
+    refused = ArcIngestRefusedError(
+        f"{error} (not resent: the request spans several measurements, and Arc "
+        "may have stored the ones before the refusal)",
+        reason=error.reason,
+        retry_safe=False,
+    )
+    refused.__cause__ = error
+    return refused
 
 
 def validate_precision(precision: Optional[str]) -> Optional[str]:
