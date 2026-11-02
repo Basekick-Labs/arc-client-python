@@ -154,6 +154,28 @@ tle = """ISS (ZARYA)
 client.write.write_tle(tle, measurement="satellite_tle")
 ```
 
+### Precision, Tags and Partial Writes
+
+```python
+client.write.write_line_protocol("cpu,host=a v=1 1700000000", precision="s")
+client.write.write_columnar("cpu", cols, tag_columns=["host", "region"])
+client.write.write_dataframe(df, "cpu", tag_columns=["host"])
+
+from arc_client import ArcPartialWriteError, ArcIngestRefusedError
+try:
+    client.write.write_line_protocol(lines)
+except ArcPartialWriteError as e:   # never resend: the rest was stored
+    print(e.dropped, e.others_written)
+except ArcIngestRefusedError as e:  # retries exhausted, or unsafe to resend
+    print(e.reason, e.retry_safe)
+```
+
+Arc refuses writes with a 503 during failover or under disk pressure. The SDK
+resends single-measurement writes that Arc reports as "nothing was written".
+It never resends a partial write, a `wal_not_durable` refusal, or a refusal
+of a body spanning several measurements: Arc may already have stored part of
+those.
+
 ## Bulk Import
 
 Import files directly (admin token required). Each returns a typed result with
@@ -260,10 +282,12 @@ DataFrame conversions can drop schema metadata; inspect the Arrow table first
 when completeness matters.
 
 Trailer capture is tested with HTTPX 0.27/0.28, httpcore 1.0.9 and h11 0.16.
-Those dependency bounds are deliberate: the adapter observes HTTP/1.1 parser
-completion without replacing HTTPX's TLS, proxy, timeout or pooling behavior.
+httpcore is bounded `>=1.0.9,<1.1`, because the internals the adapter reads are
+unchanged across 1.0.x. If a release changes them, Arrow responses that
+announce trailers fail with `ArcQueryError` rather than return unverified
+metadata.
 
-### MessagePack Response (experimental)
+### MessagePack Response
 
 A compact columnar MessagePack response with native timestamp decoding. Returns
 the same `QueryResponse` shape as `query()` (row-major `data`), plus per-column
@@ -274,9 +298,9 @@ result = client.query.query_msgpack("SELECT * FROM default.cpu LIMIT 1000")
 print(result.columns, result.types)
 ```
 
-> **Experimental.** This uses `/api/v1/query/msgpack`, which requires the Arc
-> server to be built with the `duckdb_arrow` build tag. Against a server without
-> it, the call raises `ArcNotSupportedError` (HTTP 501).
+This uses `/api/v1/query/msgpack`, stable since Arc 2026.09.1. Older servers
+built without the `duckdb_arrow` tag answer 501, which raises
+`ArcNotSupportedError`.
 
 ### Query Estimation
 
@@ -294,6 +318,25 @@ print(f"Warning level: {estimate.warning_level}")  # none, low, medium, high
 measurements = client.query.list_measurements(database="default")
 for m in measurements:
     print(f"{m.measurement}: {m.file_count} files, {m.total_size_mb:.1f} MB")
+```
+
+### Profiling, Query IDs and Measurement Reads
+
+```python
+r = client.query.query("SELECT * FROM cpu", profile=True)
+print(r.profile.total_ms, r.profile.rows_scanned, r.query_id)
+client.queries.kill(r.query_id)
+
+# Arrow wire encodings; the query ID is in the schema metadata
+t = client.query.query_arrow("SELECT * FROM cpu", dictionary=True, compression="zstd")
+t.schema.metadata[b"arc.query_id"]
+
+# Rows of one measurement without free-form SQL
+client.query.query_measurement("cpu", "metrics", limit=100, order_by="time ASC", where="host = 'a'")
+
+# Stable measurement schema (admin rebuild is queued, 202)
+s = client.databases.get_measurement_schema("metrics", "cpu")
+client.databases.rebuild_measurement_schema("metrics", "cpu")
 ```
 
 ## Async Support
@@ -450,13 +493,57 @@ client.audit.logs(event_type="query", since="2024-01-01T00:00:00Z", limit=100)
 client.queries.active()
 client.queries.kill("query-id")
 
-# Cluster / compaction / tiering / backup / MQTT
+# Cluster / compaction / tiering / backup / MQTT (admin)
 client.cluster.status()
-client.compaction.trigger(tier="hourly,daily")
+client.cluster.converge_voters()                       # plan only
+client.cluster.converge_voters(dry_run=False, confirm=True)
+client.cluster.demote_writer("writer-1", confirm=True)
+client.cluster.policies(kind="retention")              # on the Raft leader
+
+client.compaction.trigger(database="metrics", measurement="cpu")
+client.compaction.cycles(limit=5)
+client.compaction.too_wide()
+
 client.tiering.set_policy("metrics", hot_only=True, hot_max_age_days=7)
-client.backup.create()
+
+client.backup.create(databases=["metrics"])            # scoped backup
+client.backup.list(include_foreign=True)
+client.backup.restore("backup-id", confirm=True, mode="merge")
+
 client.mqtt.list_subscriptions()
 ```
+
+## Operations and Diagnostics
+
+```python
+# Readiness: should this node get traffic / writes, and if not, why?
+r = client.readiness(); print(r.ready, r.reason, r.tier)
+client.write_readiness().status   # "ready" | "not_ready" | "not_write_target"
+
+# Metrics (public) and logs (admin)
+client.diagnostics.metrics()
+client.diagnostics.timeseries("api", duration_minutes=15)
+client.diagnostics.logs(level="warn", since_minutes=30, limit=200)
+client.auth.cache_stats()
+
+# Reconciliation (enterprise clustering): dry run first, then act
+run = client.reconciliation.trigger()                 # dry run
+client.reconciliation.trigger(dry_run=False, confirm=True)
+
+# Edge sync, on the hub
+secret = client.edge_sync.register_spoke("rocket-01", name="Rocket")
+print(secret.secret)  # shown only once
+client.edge_sync.import_bundle("/mnt/drive/bundle-1")
+
+# Edge sync, on the spoke
+client.edge_sync.spoke_status()
+client.edge_sync.run_sync()          # long-running: use a large client timeout
+client.edge_sync.requeue_failed(all_failed=True)
+```
+
+Destructive or disruptive calls (`reconciliation.trigger(dry_run=False)`,
+`diagnostics.free_os_memory`, `edge_sync.rotate_spoke_secret`,
+`edge_sync.delete_spoke`, `edge_sync.dismiss_failed`) require `confirm=True`.
 
 ## Configuration
 
@@ -494,6 +581,8 @@ from arc_client.exceptions import (
     ArcLicenseError,       # Enterprise feature not licensed (403)
     ArcQueryError,         # Query execution errors
     ArcIngestionError,     # Write failures
+    ArcPartialWriteError,  # Some points dropped, others stored (400); never resend
+    ArcIngestRefusedError, # Write refused (503); .reason, .retry_safe
     ArcValidationError,    # Invalid input
     ArcNotFoundError,      # Resource not found (404)
     ArcRateLimitError,     # Rate limited (429)
@@ -562,7 +651,7 @@ Both sync and async clients provide the same methods. CQ replacements include
 `tag_columns`; retention replacements include `database`, `measurement`, and `buffer_days`.
 
 Query results retain `truncated`, `truncation_reason`, `rows_capped`, and `row_cap`
-when their wire format supplies them. Experimental `query_msgpack()` returns UTC
+when their wire format supplies them. `query_msgpack()` returns UTC
 `datetime` values when a timestamp is exactly representable at microsecond resolution.
 Submicrosecond or out-of-range timestamps remain `msgpack.Timestamp`, preserving
 `.seconds`, `.nanoseconds`, and `.to_unix_nano()`. Such cells require an explicit
