@@ -137,6 +137,7 @@ class SyncHTTPClient(HTTPClientBase):
         data: Optional[Any] = None,
         idempotent: bool = False,
         retry_if: Optional[RetryPredicate] = None,
+        timeout: Optional[float] = None,
     ) -> httpx.Response:
         """Make a POST request.
 
@@ -153,6 +154,8 @@ class SyncHTTPClient(HTTPClientBase):
             extra["files"] = files
         if data is not None:
             extra["data"] = data
+        if timeout is not None:
+            extra["timeout"] = timeout
         return self._request(
             "POST",
             path,
@@ -194,9 +197,11 @@ class SyncHTTPClient(HTTPClientBase):
         path: str,
         params: Optional[dict[str, Any]] = None,
         headers: Optional[dict[str, str]] = None,
+        timeout: Optional[float] = None,
     ) -> httpx.Response:
         """Make a DELETE request."""
-        return self._request("DELETE", path, headers=headers, params=params)
+        extra: dict[str, Any] = {"timeout": timeout} if timeout is not None else {}
+        return self._request("DELETE", path, headers=headers, params=params, **extra)
 
     def __enter__(self) -> SyncHTTPClient:
         return self

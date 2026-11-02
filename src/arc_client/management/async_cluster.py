@@ -18,6 +18,7 @@ and raise :class:`~arc_client.exceptions.ArcValidationError` otherwise.
 from __future__ import annotations
 
 from typing import Any, Optional, Union
+from urllib.parse import quote
 
 from arc_client.config import ClientConfig
 from arc_client.exceptions import ArcError, ArcValidationError
@@ -112,8 +113,20 @@ class AsyncClusterClient:
         return await self._json("delete", "/api/v1/cluster/files", params=params)
 
     async def remove_node(self, node_id: str) -> Any:
-        """Remove a node from the cluster via Raft (admin)."""
-        return await self._json("delete", f"/api/v1/cluster/nodes/{node_id}")
+        """Remove a node from the cluster via Raft (admin).
+
+        Raises:
+            ArcError: If Arc did not remove it. A node without clustering
+                answers 200 with ``success: false``, which would otherwise
+                read as a successful removal.
+        """
+        if not node_id:
+            raise ArcValidationError("node_id is required")
+        result = await self._json("delete", f"/api/v1/cluster/nodes/{quote(node_id, safe='')}")
+        if isinstance(result, dict) and result.get("success") is False:
+            reason = result.get("error") or result.get("reason") or "clustering is not enabled"
+            raise ArcError(f"Node {node_id!r} was not removed: {reason}")
+        return result
 
     async def demote_writer(self, node_id: str, confirm: bool = False) -> Any:
         """Hand the primary-writer role off ``node_id`` so the cluster elects another (admin).
@@ -138,8 +151,11 @@ class AsyncClusterClient:
 
         The target is explicit and nothing is deleted, so no ``confirm``.
         Arc refuses (409) readers, unhealthy nodes, the current holder and
-        non-leader nodes. The response's ``preemption_suppressed_seconds``
-        says how long the choice is protected from automatic preemption.
+        non-leader nodes, and, before it even checks the target, a cluster
+        that does not manage a compactor lease (no node has the compactor
+        role), so an unknown node then gets 409 rather than 404. The
+        response's ``preemption_suppressed_seconds`` says how long the choice
+        is protected from automatic preemption.
         Needs Arc 2026.09.2+.
         """
         if not node_id:

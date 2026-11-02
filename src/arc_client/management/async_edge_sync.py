@@ -34,6 +34,7 @@ from typing import Any, List, Optional
 from arc_client.config import ClientConfig
 from arc_client.exceptions import ArcError
 from arc_client.http.async_http import AsyncHTTPClient
+from arc_client.http.base import never_retry_status
 from arc_client.management.edge_sync import (
     BUNDLE_IMPORT,
     DELETE_REFUSAL,
@@ -86,14 +87,16 @@ class AsyncEdgeSyncClient:
             await self._dict("get", f"{SPOKES}/{_segment('spoke_id', spoke_id)}")
         )
 
-    async def register_spoke(self, spoke_id: str, name: str = "") -> SpokeSecret:
+    async def register_spoke(self, spoke_id: str, name: Optional[str] = None) -> SpokeSecret:
         """Register a spoke and get its HMAC secret (hub).
 
         The secret is returned only this once; store it before discarding the
         result. 409 if the ID is already registered (Arc refuses to reissue).
+        ``name`` defaults to ``spoke_id``: Arc requires a non-empty name
+        (internal/edgesync/registry.go).
         """
         _segment("spoke_id", spoke_id)
-        body = {"spoke_id": spoke_id, "name": name}
+        body = {"spoke_id": spoke_id, "name": name or spoke_id}
         return SpokeSecret.model_validate(await self._dict("post", f"{SPOKES}/", json=body))
 
     async def rotate_spoke_secret(self, spoke_id: str, confirm: bool = False) -> SpokeSecret:
@@ -167,9 +170,11 @@ class AsyncEdgeSyncClient:
 
         ``pending``, ``in_flight``, ``exported``, ``synced``, ``failed``,
         ``skipped``, ``pending_bytes`` and, once anything has synced,
-        ``last_synced_at`` / ``seconds_since_last_sync``.
+        ``last_synced_at`` / ``seconds_since_last_sync``. Files are entered
+        in the ledger by a sync or export pass, so ``pending`` stays 0 for
+        new data until one runs.
         """
-        return await self._dict("get", f"{SPOKE_SYNC}/status")
+        return await self._dict("get", f"{SPOKE_SYNC}/status", retry_if=never_retry_status)
 
     async def spoke_ledger(
         self, limit: Optional[int] = None, state: Optional[str] = None
@@ -181,7 +186,12 @@ class AsyncEdgeSyncClient:
         ``exported``, ``failed`` or ``skipped``. ``limit`` is 1-1000 (server
         default 100).
         """
-        return await self._dict("get", f"{SPOKE_SYNC}/ledger", params=_ledger_params(limit, state))
+        return await self._dict(
+            "get",
+            f"{SPOKE_SYNC}/ledger",
+            params=_ledger_params(limit, state),
+            retry_if=never_retry_status,
+        )
 
     async def run_sync(self) -> dict[str, Any]:
         """Run one network sync pass now and wait for its result (spoke).

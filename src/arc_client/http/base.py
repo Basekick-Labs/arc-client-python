@@ -216,8 +216,18 @@ def _raise_response_error(response: httpx.Response) -> None:
 
 
 def handle_connection_error(error: Exception, url: str) -> None:
-    """Handle connection errors and raise ArcConnectionError."""
-    raise ArcConnectionError(f"Failed to connect to {url}: {error}") from error
+    """Handle connection errors and raise ArcConnectionError.
+
+    Only a failure to connect means the request never reached Arc. A read
+    timeout or a connection lost mid-response happens after the request was
+    sent, so the operation may well have run on the server.
+    """
+    if isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+        raise ArcConnectionError(f"Failed to connect to {url}: {error}") from error
+    raise ArcConnectionError(
+        f"No complete response from {url} ({type(error).__name__}: {error}); the request "
+        "was sent and may have been applied by Arc. Check before retrying a mutation."
+    ) from error
 
 
 # Transient transport errors eligible for retry on read-only requests.
@@ -280,6 +290,15 @@ def is_retryable_write_refusal(response: httpx.Response) -> bool:
     """True for an ingest refusal Arc documents as safe to resend."""
     refusal = ingest_refusal(response)
     return refusal is not None and refusal[1]
+
+
+def retry_unavailable_only(response: httpx.Response) -> bool:
+    """Status-retry predicate for governed reads: retry 503, never 429.
+
+    Arc's query governance answers 429 (rate limit or quota) with no
+    Retry-After, and it does not clear within a few seconds of backoff.
+    """
+    return response.status_code == 503
 
 
 def never_retry_status(response: httpx.Response) -> bool:

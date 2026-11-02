@@ -14,6 +14,7 @@ from arc_client.exceptions import (
     ArcServerError,
     ArcValidationError,
 )
+from arc_client.http.base import retry_unavailable_only
 from arc_client.http.sync_http import SyncHTTPClient
 from arc_client.models.query import EstimateResponse, MeasurementInfo, QueryResponse
 from arc_client.query.arrow_response import QUERY_ID_HEADER, decode_arrow_response
@@ -207,7 +208,7 @@ class QueryClient:
         except ImportError as e:
             raise ImportError(
                 "pandas is required for query_pandas(). "
-                "Install it with: pip install arc-client[pandas]"
+                "Install it with: pip install arc-tsdb-client[pandas]"
             ) from e
 
         table = self.query_arrow(sql, database, dictionary=dictionary, compression=compression)
@@ -250,7 +251,7 @@ class QueryClient:
         except ImportError as e:
             raise ImportError(
                 "polars is required for query_polars(). "
-                "Install it with: pip install arc-client[polars]"
+                "Install it with: pip install arc-tsdb-client[polars]"
             ) from e
 
         table = self.query_arrow(sql, database, dictionary=dictionary, compression=compression)
@@ -276,7 +277,10 @@ class QueryClient:
             dictionary: Ask Arc to dictionary-encode low-cardinality string
                 columns (``x-arc-arrow-dictionary: true``); those columns
                 arrive as ``dictionary<int32, utf8>``. Smaller on the wire for
-                repetitive tags.
+                repetitive tags. Arc decides per column: only results of at
+                least 256 rows, and columns with at most rows/4 (and 4096)
+                distinct values, are encoded; otherwise columns stay plain
+                ``utf8`` (internal/api/query_arrow_dict.go).
             compression: Arrow IPC buffer compression, ``"zstd"`` or ``"lz4"``
                 (``x-arc-arrow-compression``), decoded transparently by
                 pyarrow. ``None`` (default) sends uncompressed buffers.
@@ -472,7 +476,13 @@ class QueryClient:
             measurement, database or self._config.database, limit, offset, order_by, where
         )
         try:
-            response = self._http.get(f"/api/v1/query/{measurement}", params=params)
+            response = self._http.get(
+                f"/api/v1/query/{measurement}",
+                params=params,
+                # Governed like the query POSTs: a 429 is a rate limit or
+                # quota (query.go checkQueryGovernance), not worth retrying.
+                retry_if=retry_unavailable_only,
+            )
             return query_response_from_json(response)
         except (ArcServerError, ArcConnectionError) as e:
             raise ArcQueryError(f"Query failed: {e}", status_code=_status(e)) from e

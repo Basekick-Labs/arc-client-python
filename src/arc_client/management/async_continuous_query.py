@@ -229,7 +229,12 @@ class AsyncContinuousQueryClient:
         end_time: Union[datetime, str, None] = None,
         dry_run: bool = False,
     ) -> ExecuteCQResponse:
-        """Execute a continuous query manually."""
+        """Execute a continuous query manually.
+
+        Arc refuses (400) an ``end_time`` more than a minute in the future.
+        ``watermark_status`` on the result is ``None`` on standalone nodes
+        and on Arc releases before 2027.01.1.
+        """
         payload: dict[str, Any] = {"dry_run": dry_run}
         if start_time:
             payload["start_time"] = (

@@ -9,6 +9,11 @@ from arc_client.exceptions import ArcError, ArcValidationError
 from arc_client.http.sync_http import SyncHTTPClient
 from arc_client.models.delete import DeleteConfigResponse, DeleteResponse
 
+# Arc may wait up to 30 s inside a delete (internal/api/delete_records.go
+# deleteLocalWait; the database delete's peer flush), so a client timeout near
+# 30 s reports a delete that ran as a failure. Deletes get at least this much.
+DELETE_TIMEOUT_FLOOR = 90.0
+
 
 class DeleteClient:
     """Synchronous client for data deletion operations.
@@ -37,6 +42,9 @@ class DeleteClient:
             where: SQL WHERE clause selecting the rows.
             dry_run: Preview only (default). Set False to delete.
             confirm: Required by Arc for any delete that is not a dry run.
+                In a cluster, send it to the primary writer: other nodes
+                refuse a data delete (503 "not primary writer") instead of
+                forwarding it, unlike writes.
             allow_unreachable: Cluster only; relaxes a safety check. Without
                 it, Arc refuses the DELETE (503) when files the cluster
                 manifest lists are not on this node yet (stream takeover), or
@@ -67,7 +75,8 @@ class DeleteClient:
             payload["allow_unreachable"] = True
 
         try:
-            response = self._http.post("/api/v1/delete", json=payload)
+            timeout = None if dry_run else max(self._config.timeout, DELETE_TIMEOUT_FLOOR)
+            response = self._http.post("/api/v1/delete", json=payload, timeout=timeout)
             data = response.json()
             return DeleteResponse(**data)
         except ArcError:

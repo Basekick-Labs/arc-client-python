@@ -158,7 +158,9 @@ plus bug fixes and the first real HTTP-layer test coverage.
   themselves.
 - `create_token(permissions=[])` and `update_token(permissions=[])` send the
   empty list, creating an RBAC-only token, instead of silently producing a
-  read/write token.
+  read/write token. On Arc, such a token gets access only where RBAC grants
+  are consulted (the `/api/v1/databases` routes); SQL query routes check the
+  coarse `read` permission, so it cannot run queries.
 - `HealthResponse` models Arc's real `/health` (`time`, `uptime_sec`,
   `storage`, `license`).
 - `dataframe_to_columnar(tag_columns=...)` is no longer a no-op.

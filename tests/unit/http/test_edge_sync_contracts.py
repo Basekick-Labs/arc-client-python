@@ -435,3 +435,31 @@ async def test_export_disabled_503(httpx_mock: HTTPXMock, async_mode: bool) -> N
         with pytest.raises(ArcServerError) as info:
             await call(client, "apply_ack", "/mnt/usb/b1")
     assert info.value.status_code == 503
+
+
+async def test_register_spoke_name_defaults_to_id(httpx_mock: HTTPXMock, async_mode: bool) -> None:
+    # Found live: Arc refuses an empty name (registry.go "spoke name is required").
+    httpx_mock.add_response(
+        method="POST", url=f"{SPOKES}/", status_code=201, json={"spoke_id": "r1", "secret": "s"}
+    )
+    async with AsyncExitStack() as stack:
+        client = await enter_client(stack, async_mode)
+        await call(client, "register_spoke", "r1")
+    assert body_of(httpx_mock) == {"spoke_id": "r1", "name": "r1"}
+
+
+@pytest.mark.parametrize("method", ["spoke_status", "spoke_ledger"])
+async def test_spoke_reads_do_not_retry_disabled_transport(
+    httpx_mock: HTTPXMock, async_mode: bool, method: str
+) -> None:
+    # Found live: 503 "no edge sync transport is enabled" is configuration.
+    httpx_mock.add_response(status_code=503, json={"error": "no edge sync transport is enabled"})
+    async with AsyncExitStack() as stack:
+        client = (
+            await stack.enter_async_context(AsyncArcClient(token="t", max_retries=3))
+            if async_mode
+            else stack.enter_context(ArcClient(token="t", max_retries=3))
+        )
+        with pytest.raises(ArcServerError):
+            await call(client, method)
+    assert len(httpx_mock.get_requests()) == 1

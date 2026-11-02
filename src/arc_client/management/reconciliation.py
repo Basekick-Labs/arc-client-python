@@ -18,6 +18,7 @@ from typing import Any
 
 from arc_client.config import ClientConfig
 from arc_client.exceptions import ArcError, ArcValidationError
+from arc_client.http.base import never_retry_status
 from arc_client.http.sync_http import SyncHTTPClient
 from arc_client.models.reconciliation import ReconciliationRun
 
@@ -103,4 +104,6 @@ class ReconciliationClient:
         if not run_id:
             raise ArcValidationError("run_id is required")
         path = f"/api/v1/reconciliation/runs/{run_id}"
-        return _run_from(self._json("get", path), path)
+        # Arc answers a node without reconciliation with a permanent 503
+        # and no Retry-After (reconciliation.go): raise at once.
+        return _run_from(self._json("get", path, retry_if=never_retry_status), path)
