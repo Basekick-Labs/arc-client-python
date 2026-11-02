@@ -110,8 +110,9 @@ async def test_scheduler_license_required_503_remains_server_error(
             with pytest.raises(ArcServerError) as error:
                 await client.schedulers.reload_continuous_queries()
     else:
-        with ArcClient(host="h", token="t", max_retries=0) as client:
-            with pytest.raises(ArcServerError) as error:
-                client.schedulers.reload_continuous_queries()
+        with ArcClient(host="h", token="t", max_retries=0) as client, pytest.raises(
+            ArcServerError
+        ) as error:
+            client.schedulers.reload_continuous_queries()
 
     assert error.value.status_code == 503
