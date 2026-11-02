@@ -7,6 +7,7 @@ from typing import Any
 from arc_client.config import ClientConfig
 from arc_client.exceptions import ArcError, ArcValidationError
 from arc_client.http.async_http import AsyncHTTPClient
+from arc_client.management.delete import DELETE_TIMEOUT_FLOOR
 from arc_client.models.database import (
     DatabaseInfo,
     DatabaseListResponse,
@@ -185,7 +186,11 @@ class AsyncDatabaseClient:
             params = {"confirm": "true"}
             if allow_unreachable:
                 params["allow_unreachable"] = "true"
-            response = await self._http.delete(f"/api/v1/databases/{name}", params=params)
+            response = await self._http.delete(
+                f"/api/v1/databases/{name}",
+                params=params,
+                timeout=max(self._config.timeout, DELETE_TIMEOUT_FLOOR),
+            )
             body: dict[str, Any] = response.json()
             return body
         except ArcError:

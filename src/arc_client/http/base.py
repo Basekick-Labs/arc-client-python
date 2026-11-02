@@ -216,8 +216,18 @@ def _raise_response_error(response: httpx.Response) -> None:
 
 
 def handle_connection_error(error: Exception, url: str) -> None:
-    """Handle connection errors and raise ArcConnectionError."""
-    raise ArcConnectionError(f"Failed to connect to {url}: {error}") from error
+    """Handle connection errors and raise ArcConnectionError.
+
+    Only a failure to connect means the request never reached Arc. A read
+    timeout or a connection lost mid-response happens after the request was
+    sent, so the operation may well have run on the server.
+    """
+    if isinstance(error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)):
+        raise ArcConnectionError(f"Failed to connect to {url}: {error}") from error
+    raise ArcConnectionError(
+        f"No complete response from {url} ({type(error).__name__}: {error}); the request "
+        "was sent and may have been applied by Arc. Check before retrying a mutation."
+    ) from error
 
 
 # Transient transport errors eligible for retry on read-only requests.
