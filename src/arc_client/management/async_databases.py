@@ -99,17 +99,33 @@ class AsyncDatabaseClient:
         except Exception as e:
             raise ArcError(f"Failed to create database {name!r}: {e}") from e
 
-    async def delete(self, name: str, confirm: bool = False) -> dict[str, Any]:
-        """Delete a database (admin). Requires confirm=True."""
+    async def delete(
+        self, name: str, confirm: bool = False, allow_unreachable: bool = False
+    ) -> dict[str, Any]:
+        """Delete a database (admin). Requires confirm=True.
+
+        Args:
+            name: Database to delete.
+            confirm: Must be True; deletion is irreversible.
+            allow_unreachable: Shared-storage cluster only; relaxes a safety
+                check. Without it, Arc refuses the deletion (503, naming
+                ``unflushed_nodes``) when other nodes could not flush the rows
+                they buffer for this database first. With it, the deletion
+                runs and the rows those nodes still buffer are left behind;
+                the response lists the nodes in ``unflushed_nodes``. Sent as
+                ``?allow_unreachable=true`` only when True. Needs Arc
+                2027.01.1+; older servers ignore it.
+        """
         validate_name(name, "database")
         if not confirm:
             raise ArcValidationError(
                 "Refusing to delete database without confirm=True. This is destructive."
             )
         try:
-            response = await self._http.delete(
-                f"/api/v1/databases/{name}", params={"confirm": "true"}
-            )
+            params = {"confirm": "true"}
+            if allow_unreachable:
+                params["allow_unreachable"] = "true"
+            response = await self._http.delete(f"/api/v1/databases/{name}", params=params)
             body: dict[str, Any] = response.json()
             return body
         except ArcError:
