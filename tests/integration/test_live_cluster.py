@@ -21,6 +21,10 @@ each container is named after its Arc node id; they are skipped when the
 ``docker`` CLI is not available. ``ARC_TEST_CLUSTER_DATA_DIR`` overrides the
 in-container storage root (default ``/app/data/arc``).
 
+``test_stream_claim_after_primary_killed`` kills the primary writer, so it runs
+only with ``ARC_TEST_CLUSTER_STREAM_TAKEOVER=1`` on a cluster with stream
+takeover enabled (see its docstring).
+
 ``remove_node`` takes a node out of Raft for good, so it runs only with
 ``ARC_TEST_CLUSTER_REMOVE_NODE=1``; it removes the reader and then restarts
 its container, which may leave the cluster needing a rebuild.
@@ -36,6 +40,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, Callable, Optional, TypeVar
 from urllib.parse import urlparse
 
@@ -134,6 +139,13 @@ def exists_on(container: str, path: str) -> bool:
         timeout=60,
     ).returncode
     return rc == 0
+
+
+def _docker_time(value: str) -> float:
+    """Seconds since the epoch of a ``docker inspect`` RFC 3339 timestamp."""
+    head, _, frac = value.rstrip("Z").partition(".")
+    stamp = datetime.strptime(head, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    return stamp.timestamp() + float(f"0.{frac or 0}")
 
 
 def flush(client: ArcClient) -> None:
@@ -807,8 +819,8 @@ def test_stream_claims_listing(cluster: Cluster) -> None:
 def test_release_stream_claim(cluster: Cluster) -> None:
     leader = cluster.leader()
     claims = leader.cluster.stream_claims()["claims"]
-    unfinished = [c for c in claims if not c.get("finished")]
-    if unfinished:  # pragma: no cover - not reachable without stream takeover
+    unfinished = [c for c in claims if not c["done"] and not c["released"]]
+    if unfinished:  # pragma: no cover - needs a claimant that cannot finish
         claim = unfinished[0]
         result = leader.cluster.release_stream_claim(claim["instance"], claim["epoch"])
         assert result["success"] is True
@@ -823,6 +835,89 @@ def test_release_stream_claim(cluster: Cluster) -> None:
         cluster.follower().cluster.release_stream_claim(0xAB, 1)
     assert exc.value.status_code == 409
     assert "leader" in str(exc.value)
+
+
+@needs_docker
+@pytest.mark.skipif(
+    os.environ.get("ARC_TEST_CLUSTER_STREAM_TAKEOVER") != "1",
+    reason="Set ARC_TEST_CLUSTER_STREAM_TAKEOVER=1 (stream-takeover cluster; kills the primary).",
+)
+def test_stream_claim_after_primary_killed(cluster: Cluster) -> None:
+    """A standby claims what a killed primary acknowledged but never flushed.
+
+    Needs ``cluster.wal_coverage`` and ``cluster.stream_takeover`` on every
+    node, automatic failover, and an ``ingest.max_buffer_age_ms`` long
+    enough (e.g. 120000) that the rows are still unflushed when the
+    primary dies. Kills the primary container and starts it again.
+    """
+    db = unique("sdkcl_claim")
+
+    def least_uptime() -> float:
+        started = [
+            docker("inspect", "-f", "{{.State.StartedAt}}", w).strip() for w in cluster.writers()
+        ]
+        now = time.time()
+        return min(now - _docker_time(s) for s in started)
+
+    # A writer restarted moments ago (an earlier run of this test) is not yet
+    # receiving the primary's stream, holds no copy, and may be the one
+    # promoted. Give every standby time to connect first.
+    wait_for(least_uptime, lambda up: up >= 45, timeout=90, interval=3, what="writers up 45s")
+    primary = cluster.primary_id()
+    listing = cluster.clients[primary].cluster.stream_claims()
+    assert listing["enabled"] is True
+    # Earlier kills leave finished claims of the same node id behind.
+    before = {(c["instance"], c["epoch"]) for c in listing["claims"]}
+    cluster.clients[primary].write.write_line_protocol(
+        [f"st,host=h{i} v={i}" for i in range(5)], database=db
+    )
+    time.sleep(1.5)  # the origin stream reaches the standbys in milliseconds
+    docker("kill", primary)
+    try:
+        survivors = {nid: c for nid, c in cluster.clients.items() if nid != primary}
+        survivor = next(iter(survivors.values()))
+
+        def claims() -> list[dict[str, Any]]:
+            listed = survivor.cluster.stream_claims()["claims"]
+            return [
+                c
+                for c in listed
+                if c["origin"] == primary and (c["instance"], c["epoch"]) not in before
+            ]
+
+        claim = wait_for(
+            claims,
+            lambda cs: bool(cs) and all(c["done"] for c in cs),
+            timeout=120,
+            interval=2,
+            what="a finished stream claim of the killed primary",
+        )[-1]
+        assert claim["by"] != primary
+        assert claim["batches"] >= 1
+        assert claim["unreplayable_batches"] == 0
+        # The claimed rows are published once, not lost and not duplicated.
+        for client in survivors.values():
+            rows = client.query.query("SELECT count(*) FROM st", database=db).data
+            assert rows[0][0] == 5
+
+        leader_id = survivor.cluster.status()["raft"]["leader_id"]
+        leader = cluster.clients[leader_id]
+        for kwargs in ({}, {"abandon": True, "confirm": True}):
+            with pytest.raises(ArcServerError) as exc:
+                leader.cluster.release_stream_claim(claim["instance"], claim["epoch"], **kwargs)
+            assert exc.value.status_code == 409
+            assert "finished" in str(exc.value)
+        with pytest.raises(ArcNotFoundError):
+            leader.cluster.release_stream_claim(claim["instance"], claim["epoch"] + 1)
+        follower = next(c for nid, c in survivors.items() if nid != leader_id)
+        with pytest.raises(ArcServerError) as exc:
+            follower.cluster.release_stream_claim(claim["instance"], claim["epoch"])
+        assert exc.value.status_code == 409
+    finally:
+        docker("start", primary)
+        cluster.wait_settled(timeout=180)
+        with contextlib.suppress(Exception):
+            cluster.clients[cluster.primary_id()].databases.delete(db, confirm=True)
 
 
 def test_abort_compaction_job_unknown(cluster: Cluster) -> None:

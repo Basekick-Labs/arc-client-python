@@ -53,7 +53,10 @@ class DeleteClient:
                 DELETE runs anyway and the rows in those files or on those
                 nodes are NOT deleted; the response names them in
                 ``unreachable_files`` and ``unflushed_nodes``. Sent only when
-                True. Needs Arc 2027.01.1+; older servers ignore it.
+                True. Needs Arc 2027.01.1+; older servers ignore it. Either
+                way Arc first waits for those files or nodes (about 30-40 s
+                for a node that does not answer); a real delete gets a
+                request timeout of at least 90 s to outlast that.
         """
         if not database:
             raise ArcValidationError("database is required")

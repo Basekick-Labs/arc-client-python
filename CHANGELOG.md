@@ -119,7 +119,10 @@ plus bug fixes and the first real HTTP-layer test coverage.
 - Real HTTP round-trip test coverage (via `pytest-httpx`) for headers, error
   mapping, compression on the wire, retries, msgpack decode, imports, databases,
   and enterprise wrappers — sync and async. Opt-in live integration tests under
-  `tests/integration` (gated on `ARC_TEST_URL`).
+  `tests/integration`: a single node (`ARC_TEST_URL`), a local-storage cluster
+  (`ARC_TEST_CLUSTER_URLS`, with an opt-in stream-takeover claim test), and a
+  shared-storage cluster with a compactor node, a cold tier and MQTT
+  (`ARC_TEST_SHARED_URLS`).
 
 ### Changed
 

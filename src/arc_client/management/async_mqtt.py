@@ -49,6 +49,11 @@ class AsyncMQTTClient:
     async def create_subscription(self, config: dict[str, Any]) -> Any:
         """Create a subscription.
 
+        A new subscription is ``stopped``: call :meth:`start_subscription`.
+        ``auto_start`` starts it when Arc boots, not on create. In a cluster a
+        subscription lives on the node it was created on (that node's
+        database), and only that node lists and runs it.
+
         Args:
             config: The subscription body (name, broker, client_id, topics, qos,
                 database, tls_*, auto_start, topic_mapping, etc.). See the Arc
