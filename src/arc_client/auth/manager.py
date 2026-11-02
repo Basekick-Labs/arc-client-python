@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, List, Optional
 
 from arc_client.config import ClientConfig
-from arc_client.exceptions import ArcAuthenticationError, ArcNotFoundError
+from arc_client.exceptions import ArcAuthenticationError, ArcError, ArcNotFoundError
 from arc_client.http.sync_http import SyncHTTPClient
 from arc_client.models.auth import (
     CreateTokenResponse,
@@ -46,6 +46,8 @@ class AuthClient:
             return VerifyResponse(**data)
         except ArcAuthenticationError:
             return VerifyResponse(valid=False, error="Invalid or expired token")
+        except ArcError:
+            raise
         except Exception as e:
             raise ArcAuthenticationError(f"Token verification failed: {e}") from e
 
@@ -58,18 +60,21 @@ class AuthClient:
     ) -> CreateTokenResponse:
         """Create a new API token. Requires admin permissions."""
         payload: dict[str, Any] = {"name": name}
-        if description:
+        if description is not None:
             payload["description"] = description
-        if permissions:
+        # An empty list is meaningful: Arc creates an RBAC-only token with no
+        # OSS permissions. Omitting the key makes Arc default to read,write
+        # (internal/api/auth_routes.go CreateTokenRequest).
+        if permissions is not None:
             payload["permissions"] = permissions
-        if expires_in:
+        if expires_in is not None:
             payload["expires_in"] = expires_in
 
         try:
             response = self._http.post("/api/v1/auth/tokens", json=payload)
             data = response.json()
             return CreateTokenResponse(**data)
-        except ArcAuthenticationError:
+        except ArcError:
             raise
         except Exception as e:
             raise ArcAuthenticationError(f"Failed to create token: {e}") from e
@@ -83,7 +88,7 @@ class AuthClient:
             if not result.success:
                 raise ArcAuthenticationError(result.error or "Failed to list tokens")
             return result.tokens
-        except ArcAuthenticationError:
+        except ArcError:
             raise
         except Exception as e:
             raise ArcAuthenticationError(f"Failed to list tokens: {e}") from e
@@ -99,7 +104,7 @@ class AuthClient:
                     raise ArcNotFoundError(f"Token {token_id} not found")
                 raise ArcAuthenticationError(error)
             return TokenInfo(**data["token"])
-        except (ArcNotFoundError, ArcAuthenticationError):
+        except ArcError:
             raise
         except Exception as e:
             raise ArcAuthenticationError(f"Failed to get token: {e}") from e
@@ -131,7 +136,7 @@ class AuthClient:
                 if "not found" in error.lower():
                     raise ArcNotFoundError(f"Token {token_id} not found")
                 raise ArcAuthenticationError(error)
-        except (ArcNotFoundError, ArcAuthenticationError):
+        except ArcError:
             raise
         except Exception as e:
             raise ArcAuthenticationError(f"Failed to update token: {e}") from e
@@ -146,7 +151,7 @@ class AuthClient:
                 if "not found" in error.lower():
                     raise ArcNotFoundError(f"Token {token_id} not found")
                 raise ArcAuthenticationError(error)
-        except (ArcNotFoundError, ArcAuthenticationError):
+        except ArcError:
             raise
         except Exception as e:
             raise ArcAuthenticationError(f"Failed to delete token: {e}") from e
@@ -165,7 +170,7 @@ class AuthClient:
             if not result.new_token:
                 raise ArcAuthenticationError("No new token returned")
             return result.new_token
-        except (ArcNotFoundError, ArcAuthenticationError):
+        except ArcError:
             raise
         except Exception as e:
             raise ArcAuthenticationError(f"Failed to rotate token: {e}") from e
@@ -180,7 +185,7 @@ class AuthClient:
                 if "not found" in error.lower():
                     raise ArcNotFoundError(f"Token {token_id} not found")
                 raise ArcAuthenticationError(error)
-        except (ArcNotFoundError, ArcAuthenticationError):
+        except ArcError:
             raise
         except Exception as e:
             raise ArcAuthenticationError(f"Failed to revoke token: {e}") from e
