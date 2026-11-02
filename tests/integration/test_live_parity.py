@@ -752,6 +752,9 @@ def test_partial_write_buffered_reported_once(admin: ArcClient, db: str) -> None
     assert stored == 0, "a dropped batch was stored"
 
 
+@pytest.mark.xfail(
+    strict=True, reason="Arc bug Basekick-Labs/arc#1424: columnar type conflict returns 500"
+)
 def test_columnar_type_conflict_status(admin: ArcClient, db: str) -> None:
     """A mixed-type column in one columnar batch is a client error.
 
@@ -836,6 +839,10 @@ def test_databases_delete_allow_unreachable(admin: ArcClient) -> None:
         admin.databases.get(name)
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason="Arc bug Basekick-Labs/arc#1425: deleted database still listed on local storage",
+)
 def test_deleted_database_not_listed(admin: ArcClient) -> None:
     """After ``databases.delete`` the database must not be listed any more.
 
