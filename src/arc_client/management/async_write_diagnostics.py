@@ -40,7 +40,13 @@ class AsyncWriteDiagnosticsClient:
         return await self._json("/api/v1/write/line-protocol/stats")
 
     async def msgpack_spec(self) -> Any:
-        """Return the raw JSON MessagePack write-protocol specification."""
+        """Return the raw JSON MessagePack write-protocol specification.
+
+        Arc's current response contains stale authentication metadata: it says
+        authentication is not implemented and lists only ``x-api-key``. The
+        endpoint does require authentication, so do not rely on that section
+        until the server-side specification is corrected.
+        """
         return await self._json("/api/v1/write/msgpack/spec")
 
     async def msgpack_stats(self) -> Any:
