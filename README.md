@@ -126,6 +126,15 @@ with client.write.buffered(batch_size=10000, flush_interval=5.0) as buffer:
     # Auto-flushes on exit or when batch_size/flush_interval reached
 ```
 
+That flush sends rows the client holds. Arc buffers accepted rows in turn and
+writes them to Parquet every `ingest.max_buffer_age_ms` (5 s by default). To
+make them queryable at once, for example in tests, flush the server's buffers
+(admin token; flushes every protocol and database on that node):
+
+```python
+client.write.flush_server_buffers()
+```
+
 ### Line Protocol
 
 For compatibility with InfluxDB tooling:

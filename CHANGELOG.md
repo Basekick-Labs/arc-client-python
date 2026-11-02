@@ -13,6 +13,9 @@ plus bug fixes and the first real HTTP-layer test coverage.
 ### Added
 
 - **Write path (Arc 2027.01.1 parity).**
+  - `client.write.flush_server_buffers()` (sync + async): flushes the node's
+    ingest buffers to Parquet now (`POST /api/v1/write/line-protocol/flush`,
+    admin). Arc flushes every protocol and database on that node.
   - `ArcPartialWriteError` (`dropped`, `others_written`) for Arc's
     `400 "partial write"`. It is never retried, and buffered writers discard
     that batch and report it once, so a resend cannot duplicate stored rows.

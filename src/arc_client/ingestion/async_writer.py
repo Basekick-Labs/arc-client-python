@@ -189,6 +189,34 @@ class AsyncWriteClient:
             raise ArcIngestionError(f"Failed to get TLE stats: {e}") from e
         return tle_stats_body(body)
 
+    async def flush_server_buffers(self) -> dict[str, Any]:
+        """Flush this node's ingest buffers to Parquet now (admin token).
+
+        ``POST /api/v1/write/line-protocol/flush``. Despite the route name,
+        Arc flushes every buffered row on the node it is sent to: line
+        protocol, MessagePack and MQTT share one buffer, across all
+        databases. Rows become visible to queries without waiting for
+        ``ingest.max_buffer_age_ms``. In a cluster it flushes only the node
+        that receives it.
+
+        Not the client-side :meth:`buffered` writer's ``flush()``, which
+        sends rows the client holds; this acts on rows Arc already accepted.
+
+        Returns:
+            Arc's JSON answer, e.g. ``{"status": "success", "message": ...}``.
+
+        Raises:
+            ArcPermissionError: The token is not an admin token.
+        """
+        try:
+            response = await self._http.post("/api/v1/write/line-protocol/flush")
+            body: dict[str, Any] = response.json()
+        except ArcError:
+            raise
+        except Exception as e:
+            raise ArcIngestionError(f"Failed to flush server buffers: {e}") from e
+        return body
+
     def buffered(
         self,
         batch_size: int = 10000,

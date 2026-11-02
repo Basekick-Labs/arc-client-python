@@ -10,6 +10,10 @@ Environment:
 ``ARC_TEST_LICENSED=1``
     The server has an enterprise license with governance, RBAC, audit,
     query management, backup and compaction enabled. Gates those tests.
+    Several of these are off by default in Arc; start the server with
+    ``ARC_DELETE_ENABLED=true ARC_GOVERNANCE_ENABLED=true
+    ARC_QUERY_MANAGEMENT_ENABLED=true ARC_AUDIT_LOG_ENABLED=true
+    ARC_AUDIT_LOG_INCLUDE_READS=true ARC_RECONCILIATION_ENABLED=true``.
 ``ARC_TEST_STORAGE_DIR``
     The server's local ``storage.local_path`` (e.g. ``<workdir>/data/arc``),
     readable from the test process. Gates the checks that read the Parquet
@@ -140,17 +144,9 @@ def uid(prefix: str) -> str:
 
 
 def server_flush(url: Optional[str] = None, token: Optional[str] = None) -> None:
-    """Flush Arc's ingest buffers (POST /api/v1/write/line-protocol/flush, admin).
-
-    Not an SDK method; used only so the tests need not wait out
-    ``ingest.max_buffer_age_ms``.
-    """
-    response = httpx.post(
-        f"{url or ARC_URL}/api/v1/write/line-protocol/flush",
-        headers={"Authorization": f"Bearer {token or ARC_TOKEN}"},
-        timeout=30,
-    )
-    response.raise_for_status()
+    """Flush Arc's ingest buffers so tests need not wait out ``ingest.max_buffer_age_ms``."""
+    with make_client(url, token) as client:
+        client.write.flush_server_buffers()
 
 
 def wait_rows(

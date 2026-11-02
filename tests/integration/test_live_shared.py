@@ -113,8 +113,8 @@ def docker(*args: str) -> str:
 
 
 def flush(client: ArcClient) -> None:
-    """Force the node's ingest buffers to parquet (no SDK wrapper for this route)."""
-    client._get_http().post("/api/v1/write/line-protocol/flush")
+    """Force the node's ingest buffers to parquet."""
+    client.write.flush_server_buffers()
 
 
 def unique(prefix: str) -> str:
