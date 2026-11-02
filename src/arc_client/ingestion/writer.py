@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 from arc_client.compression import Compression
 from arc_client.config import ClientConfig
-from arc_client.exceptions import ArcIngestionError, ArcValidationError
+from arc_client.exceptions import (
+    ArcError,
+    ArcIngestionError,
+    ArcIngestRefusedError,
+    ArcValidationError,
+)
+from arc_client.http.base import is_retryable_write_refusal
 from arc_client.http.sync_http import SyncHTTPClient
 from arc_client.ingestion.compression import compress as compress_data
 from arc_client.ingestion.line_protocol import format_line_protocol
@@ -14,6 +20,13 @@ from arc_client.ingestion.msgpack import (
     dataframe_to_columnar,
     encode_columnar,
     encode_records,
+)
+from arc_client.ingestion.write_support import (
+    as_write_error,
+    refusal_without_resend,
+    single_lp_measurement,
+    tle_stats_body,
+    validate_precision,
 )
 
 # Compression argument accepted by write methods: a codec, its name, a bool
@@ -60,6 +73,7 @@ class WriteClient:
         database: Optional[str] = None,
         compress: CompressArg = None,
         time_unit: str = "us",
+        tag_columns: Optional[list[str]] = None,
     ) -> None:
         """Write columnar data to Arc (highest performance method).
 
@@ -74,6 +88,11 @@ class WriteClient:
             database: Target database. Uses client default if not specified.
             compress: Whether to gzip compress. Uses client default if not specified.
             time_unit: Unit of timestamps - "s", "ms", or "us" (default).
+            tag_columns: Columns Arc should store as tags (indexed dimensions)
+                rather than fields. Sent as the payload's ``tag_keys``, which
+                Arc records in the Parquet ``arc:tags`` metadata (used for
+                compaction dedup and tag-aware queries). Each must be a column
+                other than ``time``. Arc releases before 2027.01 ignore it.
 
         Raises:
             ArcIngestionError: If the write fails.
@@ -91,7 +110,7 @@ class WriteClient:
         """
         # Encode to MessagePack
         try:
-            data = encode_columnar(measurement, columns, time_unit)
+            data = encode_columnar(measurement, columns, time_unit, tag_keys=tag_columns)
         except ArcValidationError:
             raise
         except Exception as e:
@@ -151,7 +170,9 @@ class WriteClient:
             measurement: The measurement (table) name.
             database: Target database. Uses client default if not specified.
             time_column: Name of the timestamp column. Default "time".
-            tag_columns: Columns to treat as tags (dimensions).
+            tag_columns: Columns to store as tags (dimensions) rather than
+                fields, sent as ``tag_keys``. Must name existing columns other
+                than the time column.
             compress: Whether to gzip compress. Uses client default if not specified.
 
         Raises:
@@ -174,13 +195,14 @@ class WriteClient:
         except Exception as e:
             raise ArcValidationError(f"Failed to convert DataFrame: {e}") from e
 
-        self.write_columnar(measurement, columns, database, compress)
+        self.write_columnar(measurement, columns, database, compress, tag_columns=tag_columns)
 
     def write_line_protocol(
         self,
         lines: str | list[str],
         database: Optional[str] = None,
         compress: CompressArg = None,
+        precision: Optional[str] = None,
     ) -> None:
         """Write data using InfluxDB Line Protocol format.
 
@@ -191,9 +213,14 @@ class WriteClient:
             lines: Line Protocol string or list of lines.
             database: Target database. Uses client default if not specified.
             compress: Whether to gzip compress. Uses client default if not specified.
+            precision: Unit of the timestamps in ``lines``: ``"ns"``, ``"us"``,
+                ``"ms"`` or ``"s"``, sent as Arc's ``?precision=``. ``None``
+                (default) sends nothing and Arc assumes nanoseconds.
 
         Raises:
             ArcIngestionError: If the write fails.
+            ArcPartialWriteError: If Arc dropped some points (never retried).
+            ArcValidationError: If ``precision`` is not one Arc accepts.
 
         Example:
             >>> client.write.write_line_protocol(
@@ -201,7 +228,9 @@ class WriteClient:
             ... )
         """
         data = "\n".join(lines) if isinstance(lines, list) else lines
-        self._write_line_protocol(data.encode("utf-8"), database, compress)
+        self._write_line_protocol(
+            data.encode("utf-8"), database, compress, validate_precision(precision)
+        )
 
     def write_point(
         self,
@@ -211,6 +240,7 @@ class WriteClient:
         timestamp: Optional[int] = None,
         database: Optional[str] = None,
         compress: CompressArg = None,
+        precision: Optional[str] = None,
     ) -> None:
         """Write a single data point using Line Protocol.
 
@@ -220,12 +250,21 @@ class WriteClient:
             measurement: The measurement name.
             fields: Dictionary of field values.
             tags: Optional dictionary of tag values.
-            timestamp: Optional timestamp in microseconds.
+            timestamp: Optional timestamp, in microseconds unless ``precision``
+                is given.
             database: Target database. Uses client default if not specified.
             compress: Whether to gzip compress. Uses client default if not specified.
+            precision: Unit of ``timestamp`` (``"ns"``, ``"us"``, ``"ms"`` or
+                ``"s"``). When given, the timestamp is sent unconverted with
+                Arc's ``?precision=``. ``None`` (default) keeps the historical
+                behavior: microseconds, converted to nanoseconds on the wire.
         """
-        line = format_line_protocol(measurement, fields, tags, timestamp)
-        self._write_line_protocol(line.encode("utf-8"), database, compress)
+        precision = validate_precision(precision)
+        # With an explicit precision the timestamp goes out as-is ("ns" means
+        # "no conversion") and Arc interprets it in that unit.
+        time_unit = "us" if precision is None else "ns"
+        line = format_line_protocol(measurement, fields, tags, timestamp, time_unit)
+        self._write_line_protocol(line.encode("utf-8"), database, compress, precision)
 
     def write_tle(
         self,
@@ -265,9 +304,11 @@ class WriteClient:
         try:
             response = self._http.get("/api/v1/write/tle/stats")
             body = response.json()
+        except ArcError:
+            raise
         except Exception as e:
             raise ArcIngestionError(f"Failed to get TLE stats: {e}") from e
-        return body.get("stats", body) if isinstance(body, dict) else {}
+        return tle_stats_body(body)
 
     def buffered(
         self,
@@ -317,11 +358,25 @@ class WriteClient:
         database: Optional[str],
         compress: CompressArg,
         extra_headers: Optional[dict[str, str]] = None,
+        params: Optional[dict[str, Any]] = None,
+        resend_refusals: Callable[[], bool] = lambda: True,
     ) -> None:
         """Compress (if requested) and POST a write payload.
 
         Arc auto-detects gzip/zstd from the payload's magic bytes, so no
         ``Content-Encoding`` header is sent.
+
+        A 503 Arc marks as an ingest refusal that applied nothing
+        (``X-Arc-Ingest-Fenced``, or ``X-Arc-Ingest-Refused`` with any reason
+        but ``wal_not_durable``) is resent up to ``max_retries`` times,
+        honoring ``Retry-After``. Nothing else is resent: a partial write, a
+        ``wal_not_durable`` refusal or any other failure may have stored
+        data. Errors are mapped by ``as_write_error``.
+
+        ``resend_refusals`` is asked only when Arc refuses the write. It answers
+        False for multi-measurement line protocol: Arc re-checks its fence per
+        measurement there, so a refusal may follow stored measurements. Such a
+        refusal is raised with ``retry_safe=False``.
         """
         codec = self._resolve_codec(compress)
         data = compress_data(data, codec)
@@ -333,16 +388,26 @@ class WriteClient:
             headers["x-arc-database"] = database
 
         try:
-            response = self._http.post(path, content=data, headers=headers)
-            # Arc returns 204 No Content on success
-            if response.status_code not in (200, 204):
-                raise ArcIngestionError(
-                    f"Write failed with status {response.status_code}: {response.text}"
-                )
-        except ArcIngestionError:
-            raise
+            response = self._http.post(
+                path,
+                content=data,
+                headers=headers,
+                params=params,
+                retry_if=lambda r: is_retryable_write_refusal(r) and resend_refusals(),
+            )
         except Exception as e:
-            raise ArcIngestionError(f"Failed to write data: {e}") from e
+            mapped = as_write_error(e)
+            if isinstance(mapped, ArcIngestRefusedError) and not resend_refusals():
+                mapped = refusal_without_resend(mapped)
+            if mapped is e:
+                raise
+            raise mapped from e
+        # Arc returns 204 No Content on success
+        if response.status_code not in (200, 204):
+            raise ArcIngestionError(
+                f"Write failed with status {response.status_code}: {response.text}",
+                status_code=response.status_code,
+            )
 
     def _write_msgpack(
         self,
@@ -350,14 +415,34 @@ class WriteClient:
         database: Optional[str],
         compress: CompressArg,
     ) -> None:
-        """Send MessagePack data to Arc."""
-        self._post_write("/api/v1/write/msgpack", data, "application/msgpack", database, compress)
+        """Send MessagePack data to Arc.
+
+        Arc checks its ingest fence once for the whole msgpack batch
+        (internal/ingest/arrow_writer.go ArrowBuffer.Write), so a refusal
+        applied nothing and is safe to resend, whatever the measurements.
+        """
+        self._post_write(
+            "/api/v1/write/msgpack",
+            data,
+            "application/msgpack",
+            database,
+            compress,
+        )
 
     def _write_line_protocol(
         self,
         data: bytes,
         database: Optional[str],
         compress: CompressArg,
+        precision: Optional[str] = None,
     ) -> None:
         """Send Line Protocol data to Arc."""
-        self._post_write("/api/v1/write/line-protocol", data, "text/plain", database, compress)
+        self._post_write(
+            "/api/v1/write/line-protocol",
+            data,
+            "text/plain",
+            database,
+            compress,
+            params={"precision": precision} if precision else None,
+            resend_refusals=lambda: single_lp_measurement(data),
+        )

@@ -1,4 +1,4 @@
-"""Decoder for the experimental MessagePack query response format.
+"""Decoder for the MessagePack query response format.
 
 Arc's ``POST /api/v1/query/msgpack`` returns a **columnar** MessagePack envelope
 (``application/msgpack``): a map with keys ``success, columns, types, data,
@@ -7,19 +7,28 @@ row_count, execution_time_ms, timestamp``. ``data`` is an array-of-columns
 native MessagePack timestamp extensions. Values exactly representable by Python
 ``datetime`` are decoded to UTC datetimes; submicrosecond or out-of-range values
 remain ``msgpack.Timestamp`` objects, preserving their seconds and nanoseconds.
-Per-cell nulls are possible.
+Per-cell nulls are possible. Optional keys: ``rows_capped``/``row_cap`` (a
+governance row cap was reached) and ``profile`` (``x-arc-profile: true``).
+
+Arc's msgpack writer declares the map's length before it streams the columns
+and never emits ``truncated``/``truncation_reason`` (internal/api/
+query_msgpack.go streamMsgPackFromBatches). A stream that fails after the 200
+was sent (client disconnect, deadline, encoder panic) therefore arrives as an
+incomplete MessagePack document. This decoder raises that as ``ArcQueryError``
+rather than returning a partial result. ``truncated`` is still read if a
+server ever sends it, for parity with the JSON envelope.
 
 The error envelope is a 4-key map ``{success: false, error, execution_time_ms,
 timestamp}``.
 
-This endpoint is experimental and requires the server's ``duckdb_arrow`` build
-tag; without it the server responds 501, surfaced as ``ArcNotSupportedError`` by
-the HTTP error handler before this decoder runs.
+The endpoint requires the server's ``duckdb_arrow`` build tag; without it the
+server responds 501, surfaced as ``ArcNotSupportedError`` by the HTTP error
+handler before this decoder runs.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 import msgpack
 
@@ -27,7 +36,7 @@ from arc_client.exceptions import ArcQueryError
 from arc_client.models.query import QueryResponse
 
 
-def decode_msgpack_query_response(content: bytes) -> QueryResponse:
+def decode_msgpack_query_response(content: bytes, query_id: Optional[str] = None) -> QueryResponse:
     """Decode a MessagePack query response envelope into a :class:`QueryResponse`.
 
     The columnar ``data`` is transposed to row-major so the result matches the
@@ -38,18 +47,34 @@ def decode_msgpack_query_response(content: bytes) -> QueryResponse:
 
     Args:
         content: Raw MessagePack response body.
+        query_id: The ``X-Arc-Query-ID`` response header, if any.
 
     Returns:
         A :class:`QueryResponse`. For a success envelope, ``data`` is row-major
         and ``types`` carries the per-column Arrow type names.
 
     Raises:
-        ArcQueryError: If the body cannot be decoded or reports ``success=false``.
+        ArcQueryError: If the body is incomplete (the server's stream ended
+            early), cannot be decoded, or reports ``success=false``.
     """
     try:
         # timestamp=3 silently drops submicrosecond precision. Decode the native
         # values first, then convert only timestamps datetime can represent exactly.
         envelope = _decode_timestamps(msgpack.unpackb(content, timestamp=0, raw=False))
+    except ValueError as e:
+        # msgpack reports a body that ends inside the declared map as
+        # "incomplete input", or, when a container header promises more items
+        # than the remaining bytes could hold, "exceeds max_*_len" (both
+        # ValueError). Arc sends such a body when its stream fails after the
+        # 200 was committed; the rows received are partial.
+        text = str(e).lower()
+        if "incomplete" in text or "exceeds max_" in text:
+            raise ArcQueryError(
+                "MessagePack query response is incomplete: the server's stream "
+                "ended before the result was complete (partial results are not "
+                "returned)"
+            ) from e
+        raise ArcQueryError(f"Failed to decode msgpack query response: {e}") from e
     except Exception as e:  # pragma: no cover - malformed body is rare
         raise ArcQueryError(f"Failed to decode msgpack query response: {e}") from e
 
@@ -82,6 +107,8 @@ def decode_msgpack_query_response(content: bytes) -> QueryResponse:
         row_cap=envelope.get("row_cap"),
         execution_time_ms=float(execution_time_ms),
         timestamp=str(timestamp) if timestamp is not None else None,
+        profile=envelope.get("profile"),
+        query_id=query_id,
     )
 
 

@@ -143,3 +143,27 @@ async def test_clear_nonnullable_rejected_before_request(async_mode):
         client = await enter_client(stack, async_mode)
         with pytest.raises(ArcValidationError):
             await call(client, "update", 7, name=CLEAR)
+
+
+EXECUTE_RESPONSE = {
+    "query_id": 7,
+    "query_name": "rollup",
+    "execution_id": "e1",
+    "status": "completed",
+    "start_time": "2026-01-01T00:00:00Z",
+    "end_time": "2026-01-01T01:00:00Z",
+    "records_written": 3,
+    "destination_measurement": "cpu_hour",
+}
+
+
+@pytest.mark.parametrize("status", [None, "set", "moved", "pending"])
+async def test_execute_watermark_status(httpx_mock, async_mode, status):
+    body = dict(EXECUTE_RESPONSE)
+    if status is not None:
+        body["watermark_status"] = status
+    httpx_mock.add_response(method="POST", json=body)
+    async with AsyncExitStack() as stack:
+        client = await enter_client(stack, async_mode)
+        result = await call(client, "execute", 7)
+    assert result.watermark_status == status

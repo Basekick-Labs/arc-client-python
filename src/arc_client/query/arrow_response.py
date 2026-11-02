@@ -16,7 +16,10 @@ _CAP = b"arc-rows-capped"
 _TRUNCATED = b"arc-stream-truncated"
 _TIME = b"arc-execution-time-ms"
 _FIELDS = {_CAP, _TRUNCATED, _TIME}
-_RESERVED = {b"arc.rows_capped", b"arc.row_cap", b"arc.execution_time_ms"}
+_RESERVED = {b"arc.rows_capped", b"arc.row_cap", b"arc.execution_time_ms", b"arc.query_id"}
+# Sent as a regular header before streaming starts (query_arrow.go), so it is
+# never a trailer. It identifies the query for client.queries.get()/kill().
+QUERY_ID_HEADER = "X-Arc-Query-ID"
 
 
 def decode_arrow_response(response: httpx.Response) -> pa.Table:
@@ -79,6 +82,9 @@ def decode_arrow_response(response: httpx.Response) -> pa.Table:
         if not math.isfinite(elapsed) or elapsed < 0:
             raise ArcQueryError("Invalid Arrow execution-time metadata")
         metadata[b"arc.execution_time_ms"] = values[_TIME]
+    query_id = response.headers.get(QUERY_ID_HEADER, "").strip()
+    if query_id:
+        metadata[b"arc.query_id"] = query_id.encode("utf-8")
 
     with ipc.open_stream(response.content) as reader:
         table = reader.read_all()

@@ -36,6 +36,13 @@ class ClientConfig(BaseModel):
         description="Base backoff in seconds for exponential retry with jitter.",
     )
 
+    send_installation_id: bool = Field(
+        default=True,
+        description="Send this installation's random id (Arc-Client-Installation-Id) so "
+        "Arc's telemetry can count SDK installations. DO_NOT_TRACK=1 or "
+        "ARC_CLIENT_SEND_INSTALLATION_ID=0 also disable it.",
+    )
+
     @field_validator("compression")
     @classmethod
     def _coerce_compression(cls, value: Union[Compression, str, bool]) -> Compression:

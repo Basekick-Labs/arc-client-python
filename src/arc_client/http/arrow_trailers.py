@@ -5,6 +5,15 @@ response hook runs before body consumption, even if the body is already in
 the parser's receive buffer. Only the owning connection's parser is observed;
 TLS, proxies, timeouts, framing and pool ownership remain with HTTPX/httpcore.
 An unsupported stream shape is detected by the Arrow decoder, never guessed.
+
+Dependency bounds (pyproject.toml): the private attributes walked below
+(``_stream``/``_httpcore_stream``/``_connection`` and ``HTTP11Connection.
+_h11_state``) are identical in httpcore 1.0.0, 1.0.5 and 1.0.9, so httpcore
+is bounded ``>=1.0.9,<1.1`` rather than pinned: 1.0.9 is the first release
+that accepts h11 0.16, and a 1.0.x patch keeps the shape. If a release ever
+moves them, capture is skipped and any response that announces Arc trailers
+fails closed with ArcQueryError ("could not be captured"); it never yields a
+table with guessed completion metadata.
 """
 
 from __future__ import annotations
@@ -60,7 +69,8 @@ def capture_arrow_trailers(response: httpx.Response) -> None:
     response.extensions[TRAILERS_EXTENSION] = sink
     # Bound{Sync,Async}Stream -> HTTPX response stream -> PoolByteStream ->
     # HTTP11ConnectionByteStream -> owning HTTP11 connection. Deliberately
-    # bounded to the dependency versions declared in pyproject.toml.
+    # bounded to the dependency versions declared in pyproject.toml (see the
+    # module docstring).
     owner: Any = response.stream
     for attribute in ("_stream", "_httpcore_stream", "_stream", "_connection"):
         owner = getattr(owner, attribute, None)

@@ -12,6 +12,70 @@ plus bug fixes and the first real HTTP-layer test coverage.
 
 ### Added
 
+- **Write path (Arc 2027.01.1 parity).**
+  - `ArcPartialWriteError` (`dropped`, `others_written`) for Arc's
+    `400 "partial write"`. It is never retried, and buffered writers discard
+    that batch and report it once, so a resend cannot duplicate stored rows.
+  - `ArcIngestRefusedError` (`reason`, `retry_safe`) for 503 refusals
+    (`X-Arc-Ingest-Fenced`, `X-Arc-Ingest-Refused`). Writes are resent
+    automatically except for `wal_not_durable` and line-protocol bodies
+    spanning several measurements, where Arc re-checks its fence per
+    measurement. A buffered writer keeps a refused batch and stays usable.
+  - `precision=` on `write_line_protocol`/`write_point`.
+  - `tag_columns=` on `write_columnar`/`write_dataframe` and buffered writes,
+    sent as msgpack `tag_keys`.
+- **Query path.**
+  - `profile=True` on `query`/`query_msgpack`, returned as `QueryResponse.profile`.
+  - `dictionary=`/`compression=` Arrow wire options.
+  - `QueryResponse.query_id`, and `arc.query_id` in the Arrow schema metadata,
+    for `client.queries.kill()`.
+  - `client.query.query_measurement()` for `GET /api/v1/query/:measurement`.
+- **Measurement schema**: `databases.get_measurement_schema()` and
+  `rebuild_measurement_schema()`.
+- **Readiness**: `client.readiness()` and `client.write_readiness()` return
+  `ReadyResponse` (`status`, `reason`, `tier`). A 503 is an answer, not an
+  error, and is not retried.
+- **Compaction**:
+  - `compaction.cycles()`, `compaction.cycle(id)`, `compaction.too_wide()`,
+    `compaction.clear_too_wide()` and `history(cycle_id=)` (Arc 2027.01.1+).
+  - `trigger(measurement=)` (Arc 2026.09.2+).
+- **Backup**: `create(databases=[...])`, `list(include_foreign=True)` and
+  `restore(mode="merge"|"replace")` (Arc 2027.01.1+). Restore still requires
+  `confirm=True`.
+- **Delete**: `allow_unreachable=True` on `delete.delete()` and
+  `databases.delete()` (Arc 2027.01.1+). A cluster delete then proceeds
+  despite unreachable files or unflushed peers, leaves those rows in place,
+  and names them in the response.
+- **Continuous queries**: `ExecuteCQResponse.watermark_status` (Arc 2027.01.1+).
+- **Cluster operator controls** (admin):
+  - `delete_file`, `demote_writer`, `assign_compactor`, `converge_voters`
+    (Arc 2026.09.2+).
+  - `stream_claims`, `release_stream_claim`, `abort_compaction_job`,
+    `policies`, `adopt_policies` (Arc 2027.01.1+).
+  - Destructive controls require `confirm=True`. `converge_voters` only
+    plans unless `dry_run=False, confirm=True`.
+- **Reconciliation** (`client.reconciliation`): `status()`, `trigger()` and
+  `get_run()`. `trigger()` is a dry run by default; acting requires
+  `dry_run=False, confirm=True`.
+- **Operational diagnostics** (`client.diagnostics`):
+  - Public JSON metrics, Prometheus text and timeseries.
+  - Admin `logs`, `memstats`, `duckdb_memory` and
+    `free_os_memory(confirm=True)`.
+  - `auth.cache_stats()` and `auth.invalidate_cache()`.
+- **Edge sync administration** (`client.edge_sync`):
+  - Hub: spoke registry and air-gap bundle import.
+  - Spoke: status, ledger, sync, requeue/dismiss, and bundle export/ack.
+  - `rotate_spoke_secret`, `delete_spoke` and `dismiss_failed` require
+    `confirm=True`.
+
+- **Installation ID for Arc's client telemetry.** Requests carry a random
+  per-installation `Arc-Client-Installation-Id` and a `User-Agent` that names
+  the Python version and platform, so Arc's opt-out telemetry can count SDK
+  installations the same way it counts arcli. The SDK itself still talks only
+  to the configured Arc server. Opt out with `DO_NOT_TRACK=1`,
+  `ARC_CLIENT_SEND_INSTALLATION_ID=0` or `send_installation_id=False`; pin the
+  ID in containers with `ARC_CLIENT_INSTALLATION_ID`. See README, "Privacy".
+
 - Arrow completion metadata in the existing `pyarrow.Table` schema for sync and
   async queries: policy cap and execution time are retained; failed, malformed,
   conflicting or unobservable announced completion metadata is rejected.
@@ -59,6 +123,15 @@ plus bug fixes and the first real HTTP-layer test coverage.
 
 ### Changed
 
+- MessagePack queries are stable. A stream that fails after the 200 raises
+  `ArcQueryError` (incomplete body) instead of returning partial rows.
+- `ready()` is a single probe: a 503 "not ready" is no longer retried with backoff.
+- `httpcore` is bounded `>=1.0.9,<1.1` instead of pinned `==1.0.9`.
+- Compaction docstrings state that every `/api/v1/compaction` route, reads
+  included, requires an admin token, as Arc enforces.
+- `User-Agent` now includes the Python version and platform
+  (`arc-client-python/0.2.0 (python/3.12.4; linux/amd64)`).
+
 - Default write compression is now **zstd** (was gzip). Passing
   `compression=True` still maps to gzip for backward compatibility.
 - Writes no longer send a `Content-Encoding` header; Arc auto-detects the codec
@@ -74,6 +147,21 @@ plus bug fixes and the first real HTTP-layer test coverage.
   while a token with no read permission raises `ArcPermissionError`.
 
 ### Fixed
+
+- Query POSTs (`query`, `query_arrow`, `query_msgpack`, `estimate`) now retry
+  503 with `Retry-After`, which Arc sends during replication catch-up, for a
+  vanished partition, and when the cold tier is unavailable. A governance 429
+  (rate limit or quota) is raised at once. A transport failure mid-response
+  is still not replayed.
+- Query and write clients no longer hide typed errors. Auth, permission,
+  scoped-access, license, rate-limit and not-supported errors surface as
+  themselves.
+- `create_token(permissions=[])` and `update_token(permissions=[])` send the
+  empty list, creating an RBAC-only token, instead of silently producing a
+  read/write token.
+- `HealthResponse` models Arc's real `/health` (`time`, `uptime_sec`,
+  `storage`, `license`).
+- `dataframe_to_columnar(tag_columns=...)` is no longer a no-op.
 
 - MessagePack queries preserve cap metadata and exact timestamp nanoseconds.
   DELETE results retain partial-failure, cold-storage and peer diagnostics.

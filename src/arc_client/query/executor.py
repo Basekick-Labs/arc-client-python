@@ -2,20 +2,30 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
 import pyarrow as pa
 
 from arc_client.config import ClientConfig
-from arc_client.exceptions import ArcNotSupportedError, ArcQueryError, ArcValidationError
+from arc_client.exceptions import (
+    ArcConnectionError,
+    ArcError,
+    ArcQueryError,
+    ArcServerError,
+    ArcValidationError,
+)
 from arc_client.http.sync_http import SyncHTTPClient
 from arc_client.models.query import EstimateResponse, MeasurementInfo, QueryResponse
-from arc_client.query.arrow_response import decode_arrow_response
+from arc_client.query.arrow_response import QUERY_ID_HEADER, decode_arrow_response
 from arc_client.query.msgpack_response import decode_msgpack_query_response
+from arc_client.query.options import (
+    arrow_headers,
+    measurement_params,
+    query_headers,
+    query_response_from_json,
+)
+from arc_client.query.options import status_code as _status
 from arc_client.validation import validate_name
-
-if TYPE_CHECKING:
-    pass
 
 
 class QueryClient:
@@ -45,22 +55,39 @@ class QueryClient:
         self._http = http
         self._config = config
 
-    def query(self, sql: str, database: Optional[str] = None) -> QueryResponse:
+    def query(
+        self, sql: str, database: Optional[str] = None, *, profile: bool = False
+    ) -> QueryResponse:
         """Execute a SQL query and return results as JSON.
 
         This method returns structured JSON data. For large result sets,
         consider using query_arrow() or query_polars() for better performance.
 
+        Queries only read, so a 503 (Arc's replication catch-up gate, a
+        partition removed mid-query, an unavailable cold tier) is retried with
+        backoff, honoring ``Retry-After``, up to ``max_retries``. A governance
+        429 (rate limit or quota) is raised at once as ``ArcRateLimitError``.
+
         Args:
             sql: SQL query to execute.
             database: Target database. Uses client default if not specified.
+            profile: Ask Arc for server-side timing (``x-arc-profile``),
+                returned in ``QueryResponse.profile``.
 
         Returns:
-            QueryResponse with columns, data, row_count, and metadata.
+            QueryResponse with columns, data, row_count, metadata and
+            ``query_id``.
 
         Raises:
-            ArcQueryError: If the query fails.
+            ArcQueryError: If the query fails. ``status_code`` carries the HTTP
+                status when Arc answered with a generic error status (e.g. 400
+                for invalid SQL).
             ArcValidationError: If the SQL is invalid.
+            ArcError: Typed failures (ArcAuthenticationError,
+                ArcPermissionError, ArcScopedAccessError, ArcRateLimitError,
+                ArcNotSupportedError, ...) are raised as themselves. Transport
+                failures (ArcConnectionError) are wrapped in ArcQueryError
+                with the original as ``__cause__``.
 
         Example:
             >>> result = client.query.query("SELECT * FROM cpu WHERE time > now() - '1h'")
@@ -70,29 +97,27 @@ class QueryClient:
         if not sql or not sql.strip():
             raise ArcValidationError("SQL query cannot be empty")
 
-        headers = {}
-        if database:
-            headers["x-arc-database"] = database
-
         try:
             response = self._http.post(
                 "/api/v1/query",
                 json={"sql": sql},
-                headers=headers if headers else None,
+                headers=query_headers(database, profile) or None,
+                idempotent=True,
             )
-
-            data = response.json()
-            return QueryResponse(**data)
-
-        except ArcQueryError:
+            return query_response_from_json(response)
+        except (ArcServerError, ArcConnectionError) as e:
+            raise ArcQueryError(f"Query failed: {e}", status_code=_status(e)) from e
+        except ArcError:
             raise
         except Exception as e:
             raise ArcQueryError(f"Query failed: {e}") from e
 
-    def query_msgpack(self, sql: str, database: Optional[str] = None) -> QueryResponse:
+    def query_msgpack(
+        self, sql: str, database: Optional[str] = None, *, profile: bool = False
+    ) -> QueryResponse:
         """Execute a SQL query and decode the MessagePack response.
 
-        **Experimental.** This uses Arc's ``/api/v1/query/msgpack`` endpoint,
+        This uses Arc's ``/api/v1/query/msgpack`` endpoint,
         which returns a compact columnar MessagePack envelope with native
         timestamp encoding without silently discarding nanoseconds. Exactly representable
         microseconds become UTC datetime; other values remain msgpack.Timestamp.
@@ -103,38 +128,57 @@ class QueryClient:
         The endpoint requires the Arc server to be built with the
         ``duckdb_arrow`` build tag; otherwise the server responds with HTTP 501.
 
+        A stream Arc fails after sending the 200 (client disconnect, deadline)
+        arrives as an incomplete MessagePack body and raises ArcQueryError;
+        partial rows are never returned (Arc's msgpack writer has no
+        ``truncated`` marker).
+
         Args:
             sql: SQL query to execute.
             database: Target database. Uses client default if not specified.
+            profile: Ask Arc for server-side timing (``x-arc-profile``),
+                returned in ``QueryResponse.profile``.
 
         Returns:
-            QueryResponse with row-major ``data`` and populated ``types``.
+            QueryResponse with row-major ``data``, populated ``types`` and
+            ``query_id``.
 
         Raises:
             ArcValidationError: If the SQL is empty.
             ArcNotSupportedError: If the server lacks msgpack query support (501).
-            ArcQueryError: If the query fails.
+            ArcQueryError: If the query fails or the response is incomplete.
         """
         if not sql or not sql.strip():
             raise ArcValidationError("SQL query cannot be empty")
 
-        headers = {"Accept": "application/msgpack"}
-        if database:
-            headers["x-arc-database"] = database
+        headers = query_headers(database, profile)
+        headers["Accept"] = "application/msgpack"
 
         try:
             response = self._http.post(
                 "/api/v1/query/msgpack",
                 json={"sql": sql},
                 headers=headers,
+                idempotent=True,
             )
-            return decode_msgpack_query_response(response.content)
-        except (ArcQueryError, ArcNotSupportedError, ArcValidationError):
+            return decode_msgpack_query_response(
+                response.content, query_id=response.headers.get(QUERY_ID_HEADER)
+            )
+        except (ArcServerError, ArcConnectionError) as e:
+            raise ArcQueryError(f"Query failed: {e}", status_code=_status(e)) from e
+        except ArcError:
             raise
         except Exception as e:
             raise ArcQueryError(f"Query failed: {e}") from e
 
-    def query_pandas(self, sql: str, database: Optional[str] = None) -> Any:
+    def query_pandas(
+        self,
+        sql: str,
+        database: Optional[str] = None,
+        *,
+        dictionary: bool = False,
+        compression: Optional[str] = None,
+    ) -> Any:
         """Execute a SQL query and return results as a pandas DataFrame.
 
         Uses Arrow IPC streaming for efficient data transfer. Requires
@@ -143,6 +187,9 @@ class QueryClient:
         Args:
             sql: SQL query to execute.
             database: Target database. Uses client default if not specified.
+            dictionary: See :meth:`query_arrow`. Dictionary-encoded string
+                columns become pandas ``Categorical`` columns.
+            compression: See :meth:`query_arrow`.
 
         Returns:
             pandas.DataFrame with query results.
@@ -163,10 +210,17 @@ class QueryClient:
                 "Install it with: pip install arc-client[pandas]"
             ) from e
 
-        table = self.query_arrow(sql, database)
+        table = self.query_arrow(sql, database, dictionary=dictionary, compression=compression)
         return table.to_pandas()
 
-    def query_polars(self, sql: str, database: Optional[str] = None) -> Any:
+    def query_polars(
+        self,
+        sql: str,
+        database: Optional[str] = None,
+        *,
+        dictionary: bool = False,
+        compression: Optional[str] = None,
+    ) -> Any:
         """Execute a SQL query and return results as a Polars DataFrame.
 
         Uses Arrow IPC streaming for efficient zero-copy data transfer.
@@ -176,6 +230,9 @@ class QueryClient:
         Args:
             sql: SQL query to execute.
             database: Target database. Uses client default if not specified.
+            dictionary: See :meth:`query_arrow`. Dictionary-encoded string
+                columns become polars ``Categorical`` columns.
+            compression: See :meth:`query_arrow`.
 
         Returns:
             polars.DataFrame with query results.
@@ -196,10 +253,17 @@ class QueryClient:
                 "Install it with: pip install arc-client[polars]"
             ) from e
 
-        table = self.query_arrow(sql, database)
+        table = self.query_arrow(sql, database, dictionary=dictionary, compression=compression)
         return pl.from_arrow(table)
 
-    def query_arrow(self, sql: str, database: Optional[str] = None) -> pa.Table:
+    def query_arrow(
+        self,
+        sql: str,
+        database: Optional[str] = None,
+        *,
+        dictionary: bool = False,
+        compression: Optional[str] = None,
+    ) -> pa.Table:
         """Execute a SQL query and return results as a PyArrow Table.
 
         Uses Arrow IPC streaming for efficient zero-copy data transfer.
@@ -209,15 +273,25 @@ class QueryClient:
         Args:
             sql: SQL query to execute.
             database: Target database. Uses client default if not specified.
+            dictionary: Ask Arc to dictionary-encode low-cardinality string
+                columns (``x-arc-arrow-dictionary: true``); those columns
+                arrive as ``dictionary<int32, utf8>``. Smaller on the wire for
+                repetitive tags.
+            compression: Arrow IPC buffer compression, ``"zstd"`` or ``"lz4"``
+                (``x-arc-arrow-compression``), decoded transparently by
+                pyarrow. ``None`` (default) sends uncompressed buffers.
 
         Returns:
             pyarrow.Table with query results and completion metadata in
-            its schema: arc.rows_capped, arc.row_cap, arc.execution_time_ms.
-            Missing cap metadata means unknown. Truncation raises ArcQueryError.
+            its schema: arc.rows_capped, arc.row_cap, arc.execution_time_ms,
+            and arc.query_id (Arc's ``X-Arc-Query-ID``, for
+            ``client.queries``). Missing cap metadata means unknown.
+            Truncation raises ArcQueryError.
 
         Raises:
             ArcQueryError: If the query fails.
-            ArcValidationError: If the SQL is invalid.
+            ArcValidationError: If the SQL is empty, or ``compression`` is not
+                ``"zstd"`` or ``"lz4"``.
 
         Example:
             >>> table = client.query.query_arrow("SELECT * FROM cpu LIMIT 1000")
@@ -227,22 +301,21 @@ class QueryClient:
         if not sql or not sql.strip():
             raise ArcValidationError("SQL query cannot be empty")
 
-        headers = {
-            "Accept": "application/vnd.apache.arrow.stream",
-        }
-        if database:
-            headers["x-arc-database"] = database
+        headers = arrow_headers(database, dictionary, compression)
 
         try:
             response = self._http.post(
                 "/api/v1/query/arrow",
                 json={"sql": sql},
                 headers=headers,
+                idempotent=True,
             )
 
             return decode_arrow_response(response)
 
-        except ArcQueryError:
+        except (ArcServerError, ArcConnectionError) as e:
+            raise ArcQueryError(f"Query failed: {e}", status_code=_status(e)) from e
+        except ArcError:
             raise
         except pa.ArrowInvalid as e:
             raise ArcQueryError(f"Failed to parse Arrow response: {e}") from e
@@ -275,21 +348,20 @@ class QueryClient:
         if not sql or not sql.strip():
             raise ArcValidationError("SQL query cannot be empty")
 
-        headers = {}
-        if database:
-            headers["x-arc-database"] = database
-
         try:
             response = self._http.post(
                 "/api/v1/query/estimate",
                 json={"sql": sql},
-                headers=headers if headers else None,
+                headers=query_headers(database, False) or None,
+                idempotent=True,
             )
 
             data = response.json()
             return EstimateResponse(**data)
 
-        except ArcQueryError:
+        except (ArcServerError, ArcConnectionError) as e:
+            raise ArcQueryError(f"Estimation failed: {e}", status_code=_status(e)) from e
+        except ArcError:
             raise
         except Exception as e:
             raise ArcQueryError(f"Estimation failed: {e}") from e
@@ -325,7 +397,9 @@ class QueryClient:
 
             return [MeasurementInfo(**m) for m in data.get("measurements", [])]
 
-        except ArcQueryError:
+        except (ArcServerError, ArcConnectionError) as e:
+            raise ArcQueryError(f"Failed to list measurements: {e}", status_code=_status(e)) from e
+        except ArcError:
             raise
         except Exception as e:
             raise ArcQueryError(f"Failed to list measurements: {e}") from e
@@ -354,10 +428,58 @@ class QueryClient:
             # Extract database names from result
             return [row[0] for row in result.data if row]
 
-        except ArcQueryError:
+        except ArcError:
             raise
         except Exception as e:
             raise ArcQueryError(f"Failed to list databases: {e}") from e
+
+    def query_measurement(
+        self,
+        measurement: str,
+        database: Optional[str] = None,
+        *,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        order_by: Optional[str] = None,
+        where: Optional[str] = None,
+    ) -> QueryResponse:
+        """Read rows of one measurement with ``GET /api/v1/query/:measurement``.
+
+        Arc builds ``SELECT * FROM <database>.<measurement> [WHERE <where>]
+        ORDER BY <order_by> LIMIT <limit> OFFSET <offset>`` itself and
+        validates every piece. Omitted arguments take Arc's defaults:
+        ``limit`` 100, ``offset`` 0, ``order_by`` ``"time DESC"``.
+
+        Args:
+            measurement: Measurement (table) name.
+            database: Database name. This endpoint takes the database as a
+                query parameter, not the ``x-arc-database`` header; the client
+                default is sent when not specified, else Arc uses
+                ``"default"``.
+            limit: Maximum rows, 0..1,000,000.
+            offset: Rows to skip, >= 0.
+            order_by: ORDER BY clause, e.g. ``"time ASC"``.
+            where: WHERE clause without the keyword, e.g. ``"host = 'a'"``.
+
+        Returns:
+            QueryResponse, as from :meth:`query`.
+
+        Raises:
+            ArcValidationError: If a name or a numeric argument is invalid.
+            ArcQueryError: If Arc rejects the request (``status_code`` set).
+        """
+        params = measurement_params(
+            measurement, database or self._config.database, limit, offset, order_by, where
+        )
+        try:
+            response = self._http.get(f"/api/v1/query/{measurement}", params=params)
+            return query_response_from_json(response)
+        except (ArcServerError, ArcConnectionError) as e:
+            raise ArcQueryError(f"Query failed: {e}", status_code=_status(e)) from e
+        except ArcError:
+            raise
+        except Exception as e:
+            raise ArcQueryError(f"Query failed: {e}") from e
 
     def show_tables(self, database: Optional[str] = None) -> QueryResponse:
         """Show tables/measurements in a database.

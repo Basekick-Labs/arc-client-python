@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from arc_client.config import ClientConfig
 from arc_client.exceptions import ArcError, ArcValidationError
 from arc_client.http.sync_http import SyncHTTPClient
@@ -25,8 +27,26 @@ class DeleteClient:
         where: str,
         dry_run: bool = True,
         confirm: bool = False,
+        allow_unreachable: bool = False,
     ) -> DeleteResponse:
-        """Delete data matching the WHERE clause."""
+        """Delete data matching the WHERE clause.
+
+        Args:
+            database: Database holding the measurement.
+            measurement: Measurement to delete from.
+            where: SQL WHERE clause selecting the rows.
+            dry_run: Preview only (default). Set False to delete.
+            confirm: Required by Arc for any delete that is not a dry run.
+            allow_unreachable: Cluster only; relaxes a safety check. Without
+                it, Arc refuses the DELETE (503) when files the cluster
+                manifest lists are not on this node yet (stream takeover), or
+                when other nodes of a shared-storage cluster could not flush
+                the rows they buffer for this measurement first. With it, the
+                DELETE runs anyway and the rows in those files or on those
+                nodes are NOT deleted; the response names them in
+                ``unreachable_files`` and ``unflushed_nodes``. Sent only when
+                True. Needs Arc 2027.01.1+; older servers ignore it.
+        """
         if not database:
             raise ArcValidationError("database is required")
         if not measurement:
@@ -36,13 +56,15 @@ class DeleteClient:
                 "where clause is required. Use '1=1' with confirm=True for full delete"
             )
 
-        payload = {
+        payload: dict[str, Any] = {
             "database": database,
             "measurement": measurement,
             "where": where,
             "dry_run": dry_run,
             "confirm": confirm,
         }
+        if allow_unreachable:
+            payload["allow_unreachable"] = True
 
         try:
             response = self._http.post("/api/v1/delete", json=payload)
