@@ -540,7 +540,12 @@ def test_delete_on_standby_writer_is_refused_not_forwarded(cluster: Cluster) -> 
 
 @pytest.fixture
 def missing_on_primary(cluster: Cluster) -> Iterator[tuple[str, str, str]]:
-    """A manifest file removed from the primary's disk (kept on the other nodes).
+    """A manifest file removed from every node's disk (kept in the manifest).
+
+    It must be gone everywhere: Arc's delete waits up to deleteLocalWait for
+    listed files, and the file puller heals a copy missing on one node from
+    any peer that still has it, so a file removed from the primary alone is
+    only unreachable until that pull lands (the earlier, flaky version).
 
     Yields ``(database, measurement, path)``. Teardown removes the path from
     the manifest cluster-wide with delete_file.
@@ -549,9 +554,10 @@ def missing_on_primary(cluster: Cluster) -> Iterator[tuple[str, str, str]]:
         pytest.skip("needs the docker CLI")
     db = unique("sdkcl_unr")
     path = write_and_locate(cluster, db, "unr", ["unr,host=a v=1", "unr,host=b v=2"])[0]["path"]
-    primary = cluster.primary_id()
-    docker("exec", primary, "rm", "-f", f"{DATA_DIR}/{path}")
-    assert not exists_on(primary, path)
+    for node in cluster.clients:
+        docker("exec", node, "rm", "-f", f"{DATA_DIR}/{path}")
+    for node in cluster.clients:
+        assert not exists_on(node, path)
     yield db, "unr", path
     with contextlib.suppress(ArcNotFoundError):
         cluster.leader().cluster.delete_file(path, confirm=True, reason="sdk test cleanup")
