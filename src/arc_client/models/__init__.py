@@ -21,6 +21,7 @@ from arc_client.models.database import (
 )
 from arc_client.models.delete import DeleteConfigResponse, DeleteResponse
 from arc_client.models.diagnostics import ReadinessStatus
+from arc_client.models.edge_sync import Spoke, SpokeSecret
 from arc_client.models.import_ import (
     ImportResult,
     ImportStats,
@@ -61,6 +62,8 @@ __all__ = [
     "RetentionExecution",
     "RetentionPolicy",
     "RotateTokenResponse",
+    "Spoke",
+    "SpokeSecret",
     "TokenInfo",
     "TokenListResponse",
     "VerifyResponse",

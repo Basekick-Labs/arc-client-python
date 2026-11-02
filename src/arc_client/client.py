@@ -91,6 +91,7 @@ class ArcClient:
         self._tiering: Any = None
         self._backup: Any = None
         self._mqtt: Any = None
+        self._edge_sync: Any = None
         self._diagnostics: Any = None
         self._reconciliation: Any = None
 
@@ -275,6 +276,15 @@ class ArcClient:
 
             self._diagnostics = DiagnosticsClient(self._get_http(), self._config)
         return self._diagnostics
+
+    @property
+    def edge_sync(self) -> Any:
+        """Get the edge-sync administration client (hub spokes/import, spoke sync/export)."""
+        if self._edge_sync is None:
+            from arc_client.management.edge_sync import EdgeSyncClient
+
+            self._edge_sync = EdgeSyncClient(self._get_http(), self._config)
+        return self._edge_sync
 
     def health(self) -> HealthResponse:
         """Check server health.

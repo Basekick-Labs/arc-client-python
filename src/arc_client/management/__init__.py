@@ -2,7 +2,7 @@
 
 Retention, continuous queries, delete, databases, and the enterprise surface
 (RBAC, governance, audit, query management, cluster, compaction, tiering,
-backup, MQTT).
+backup, MQTT) and operations (reconciliation, diagnostics, edge sync).
 """
 
 from arc_client.management.async_audit import AsyncAuditClient
@@ -13,6 +13,7 @@ from arc_client.management.async_continuous_query import AsyncContinuousQueryCli
 from arc_client.management.async_databases import AsyncDatabaseClient
 from arc_client.management.async_delete import AsyncDeleteClient
 from arc_client.management.async_diagnostics import AsyncDiagnosticsClient
+from arc_client.management.async_edge_sync import AsyncEdgeSyncClient
 from arc_client.management.async_governance import AsyncGovernanceClient
 from arc_client.management.async_mqtt import AsyncMQTTClient
 from arc_client.management.async_query_management import AsyncQueryManagementClient
@@ -28,6 +29,7 @@ from arc_client.management.continuous_query import ContinuousQueryClient
 from arc_client.management.databases import DatabaseClient
 from arc_client.management.delete import DeleteClient
 from arc_client.management.diagnostics import DiagnosticsClient
+from arc_client.management.edge_sync import EdgeSyncClient
 from arc_client.management.governance import GovernanceClient
 from arc_client.management.mqtt import MQTTClient
 from arc_client.management.query_management import QueryManagementClient
@@ -69,4 +71,6 @@ __all__ = [
     "AsyncReconciliationClient",
     "DiagnosticsClient",
     "AsyncDiagnosticsClient",
+    "EdgeSyncClient",
+    "AsyncEdgeSyncClient",
 ]
