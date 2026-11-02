@@ -91,6 +91,7 @@ class ArcClient:
         self._tiering: Any = None
         self._backup: Any = None
         self._mqtt: Any = None
+        self._reconciliation: Any = None
 
     def _get_http(self) -> SyncHTTPClient:
         """Get or create the HTTP client."""
@@ -255,6 +256,15 @@ class ArcClient:
 
             self._mqtt = MQTTClient(self._get_http(), self._config)
         return self._mqtt
+
+    @property
+    def reconciliation(self) -> Any:
+        """Get the manifest/storage reconciliation client (enterprise)."""
+        if self._reconciliation is None:
+            from arc_client.management.reconciliation import ReconciliationClient
+
+            self._reconciliation = ReconciliationClient(self._get_http(), self._config)
+        return self._reconciliation
 
     def health(self) -> HealthResponse:
         """Check server health.

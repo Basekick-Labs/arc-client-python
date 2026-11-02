@@ -27,6 +27,7 @@ from arc_client.models.import_ import (
     TLEImportResult,
 )
 from arc_client.models.query import EstimateResponse, MeasurementInfo, QueryResponse
+from arc_client.models.reconciliation import ReconciliationRun
 from arc_client.models.retention import (
     ExecuteRetentionResponse,
     RetentionExecution,
@@ -53,6 +54,7 @@ __all__ = [
     "HealthResponse",
     "MeasurementInfo",
     "QueryResponse",
+    "ReconciliationRun",
     "ReadyResponse",
     "RetentionExecution",
     "RetentionPolicy",
