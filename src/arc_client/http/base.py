@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import httpx
 
@@ -18,6 +18,7 @@ from arc_client.exceptions import (
     ArcAuthenticationError,
     ArcConnectionError,
     ArcError,
+    ArcIngestRefusedError,
     ArcLicenseError,
     ArcNotFoundError,
     ArcNotSupportedError,
@@ -138,6 +139,7 @@ def _raise_response_error(response: httpx.Response) -> None:
         ArcNotFoundError: HTTP 404.
         ArcRateLimitError: HTTP 429.
         ArcNotSupportedError: HTTP 501.
+        ArcIngestRefusedError: HTTP 503 carrying Arc's ingest-refusal headers.
         ArcServerError: HTTP 5xx and any other non-2xx status.
     """
     if response.is_success:
@@ -195,6 +197,13 @@ def _raise_response_error(response: httpx.Response) -> None:
         raise ArcRateLimitError(f"Rate limit exceeded: {message}")
     elif status_code == 501:
         raise ArcNotSupportedError(f"Operation not supported by server: {message}")
+    elif (refusal := ingest_refusal(response)) is not None:
+        reason, retry_safe = refusal
+        raise ArcIngestRefusedError(
+            f"Write refused by Arc ({reason}): {message}",
+            reason=reason,
+            retry_safe=retry_safe,
+        )
     elif status_code >= 500:
         raise ArcServerError(f"Server error: {message}", status_code=status_code)
     else:
@@ -216,14 +225,61 @@ RETRYABLE_TRANSPORT_ERRORS = (
     httpx.RemoteProtocolError,
 )
 
-# HTTP status codes worth retrying: 429 rate-limit, 503 schema-churn /
-# replication catch-up (both explicitly retryable per the Arc server).
+# HTTP status codes worth retrying on reads and idempotent query POSTs:
+# 429 (rate limit / query governance) and 503. Arc answers 503 with
+# Retry-After for a read it cannot serve right now: the replication catch-up
+# gate (internal/api/query.go checkReplicationReady), a partition removed
+# while the query ran, and a cold tier configured but unavailable. Write-side
+# 503s are NOT covered by this set; see is_retryable_write_refusal.
 RETRYABLE_STATUS_CODES = frozenset({429, 503})
+
+# Arc marks a 503 that refused a write before applying it
+# (internal/api/routing.go IngestFencedHeader / IngestRefusedHeader).
+INGEST_FENCED_HEADER = "X-Arc-Ingest-Fenced"
+INGEST_REFUSED_HEADER = "X-Arc-Ingest-Refused"
+# The one refusal reason that may have applied part of the request
+# (internal/ingest/refusal.go RefusalWALNotDurable): a retry can duplicate rows.
+REFUSAL_WAL_NOT_DURABLE = "wal_not_durable"
+
+# A per-request status-retry predicate: True means "retry this response".
+RetryPredicate = Callable[[httpx.Response], bool]
 
 
 def is_retryable_status(status_code: int) -> bool:
     """Return True if a response status should be retried."""
     return status_code in RETRYABLE_STATUS_CODES
+
+
+def ingest_refusal(response: httpx.Response) -> Optional[tuple[str, bool]]:
+    """Describe an Arc ingest refusal as ``(reason, retry_safe)``, else None.
+
+    Only a 503 carrying ``X-Arc-Ingest-Fenced`` (the node is not the available
+    primary writer) or ``X-Arc-Ingest-Refused: <reason>`` (a node-local,
+    transient condition such as ``wal_disk``) is a refusal. Arc documents both
+    as "nothing was written, retry", except reason ``wal_not_durable``: earlier
+    parts of the same request may already be stored, so a retry may duplicate
+    rows and is never automatic.
+    """
+    if response.status_code != 503:
+        return None
+    refused = response.headers.get(INGEST_REFUSED_HEADER)
+    if refused is not None:
+        reason = refused.strip().lower() or "other"
+        return reason, reason != REFUSAL_WAL_NOT_DURABLE
+    if response.headers.get(INGEST_FENCED_HEADER) is not None:
+        return "fenced", True
+    return None
+
+
+def is_retryable_write_refusal(response: httpx.Response) -> bool:
+    """True for an ingest refusal Arc documents as safe to resend."""
+    refusal = ingest_refusal(response)
+    return refusal is not None and refusal[1]
+
+
+def never_retry_status(response: httpx.Response) -> bool:
+    """Status-retry predicate that disables status retries for one request."""
+    return False
 
 
 def parse_retry_after(response: httpx.Response) -> Optional[float]:

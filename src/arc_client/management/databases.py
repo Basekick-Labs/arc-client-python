@@ -11,8 +11,10 @@ from arc_client.models.database import (
     DatabaseInfo,
     DatabaseListResponse,
     MeasurementListResponse,
+    MeasurementSchema,
+    SchemaRebuildResponse,
 )
-from arc_client.validation import validate_name
+from arc_client.validation import path_segment, validate_name
 
 
 class DatabaseClient:
@@ -105,6 +107,62 @@ class DatabaseClient:
             raise
         except Exception as e:
             raise ArcError(f"Failed to list measurements for {name!r}: {e}") from e
+
+    def get_measurement_schema(self, database: str, measurement: str) -> MeasurementSchema:
+        """Get a measurement's registered field schema.
+
+        ``GET /api/v1/databases/:database/measurements/:measurement/schema``
+        returns the columns and types every query binds for the measurement,
+        regardless of the time range it reads (Arc's ``query.stable_schema``
+        registry, built by ingest or by :meth:`rebuild_measurement_schema`).
+        Needs read permission on the measurement.
+
+        Raises:
+            ArcNotFoundError: The registry is disabled on the server, or no
+                schema is registered for this measurement yet.
+            ArcPermissionError: The token may not read the measurement.
+            ArcServerError: HTTP 503 when the registry could not be read.
+            ArcValidationError: A name cannot be a URL path segment.
+        """
+        path = (
+            f"/api/v1/databases/{path_segment(database, 'database')}"
+            f"/measurements/{path_segment(measurement, 'measurement')}/schema"
+        )
+        try:
+            response = self._http.get(path)
+            return MeasurementSchema.model_validate(response.json())
+        except ArcError:
+            raise
+        except Exception as e:
+            raise ArcError(f"Failed to get schema for {database}.{measurement}: {e}") from e
+
+    def rebuild_measurement_schema(self, database: str, measurement: str) -> SchemaRebuildResponse:
+        """Queue a rebuild of a measurement's registered field schema (admin).
+
+        ``POST .../measurements/:measurement/schema/rebuild`` samples a bounded
+        set of the measurement's files and merges what it finds into the
+        registered schema (fields are added, never dropped). Arc answers 202
+        once the rebuild is queued; it runs in the background.
+
+        Raises:
+            ArcNotFoundError: The registry is disabled on the server.
+            ArcServerError: HTTP 409 when a rebuild for this measurement is
+                already queued or running; HTTP 503 when the rebuild queue is
+                full or rebuilds are unavailable on this node.
+            ArcPermissionError: The token is not an admin token.
+            ArcValidationError: A name cannot be a URL path segment.
+        """
+        path = (
+            f"/api/v1/databases/{path_segment(database, 'database')}"
+            f"/measurements/{path_segment(measurement, 'measurement')}/schema/rebuild"
+        )
+        try:
+            response = self._http.post(path)
+            return SchemaRebuildResponse.model_validate(response.json())
+        except ArcError:
+            raise
+        except Exception as e:
+            raise ArcError(f"Failed to rebuild schema for {database}.{measurement}: {e}") from e
 
     def create(self, name: str) -> DatabaseInfo:
         """Create a database (admin).

@@ -11,7 +11,8 @@ Columnar Format (RECOMMENDED):
             "time": [1633024800000000, 1633024801000000],  # microseconds
             "host": ["server01", "server01"],
             "usage": [45.2, 47.8],
-        }
+        },
+        "tag_keys": ["host"],  # optional: which columns are tags
     }
 
 Row Format (LEGACY):
@@ -37,6 +38,7 @@ def encode_columnar(
     measurement: str,
     columns: dict[str, list[Any]],
     time_unit: str = "us",
+    tag_keys: Optional[list[str]] = None,
 ) -> bytes:
     """Encode columnar data to MessagePack format.
 
@@ -51,12 +53,17 @@ def encode_columnar(
         time_unit: Unit of timestamps in the 'time' column.
             Options: "s" (seconds), "ms" (milliseconds), "us" (microseconds).
             Default is "us" (microseconds).
+        tag_keys: Columns Arc should store as tags rather than fields, sent as
+            the payload's ``tag_keys`` (Arc 2027.01, internal/ingest/
+            msgpack_typed.go; older servers ignore the key). Each must name a
+            column other than ``time``. Omitted from the payload when empty.
 
     Returns:
         MessagePack encoded bytes ready for Arc ingestion.
 
     Raises:
-        ArcValidationError: If columns are invalid or missing required 'time'.
+        ArcValidationError: If columns are invalid or missing required 'time',
+            or a tag key does not name a non-time column.
 
     Example:
         >>> data = encode_columnar(
@@ -91,13 +98,42 @@ def encode_columnar(
     # Normalize timestamps to microseconds if needed
     columns = _normalize_timestamps(columns, time_unit)
 
-    payload = {
+    payload: dict[str, Any] = {
         "m": measurement,
         "columns": columns,
     }
+    tags = validate_tag_keys(tag_keys, columns)
+    if tags:
+        payload["tag_keys"] = tags
 
     result: bytes = msgpack.packb(payload, use_bin_type=True)
     return result
+
+
+def validate_tag_keys(
+    tag_keys: Optional[list[str]], columns: Any, time_column: str = "time"
+) -> list[str]:
+    """Validate tag column names against a column collection.
+
+    Returns the tag keys de-duplicated in their given order. Raises
+    ArcValidationError for a non-string name, the time column, or a name that
+    is not one of ``columns``.
+    """
+    if not tag_keys:
+        return []
+    if isinstance(tag_keys, str):
+        raise ArcValidationError("tag columns must be a list of column names, not a string")
+    seen: list[str] = []
+    for key in tag_keys:
+        if not isinstance(key, str) or not key:
+            raise ArcValidationError(f"Invalid tag column {key!r}: must be a column name")
+        if key == time_column or key == "time":
+            raise ArcValidationError(f"The time column {key!r} cannot be a tag")
+        if key not in columns:
+            raise ArcValidationError(f"Tag column {key!r} is not one of the columns")
+        if key not in seen:
+            seen.append(key)
+    return seen
 
 
 def encode_records(records: list[dict[str, Any]]) -> bytes:
@@ -249,20 +285,27 @@ def dataframe_to_columnar(
         df: DataFrame to convert (pandas, polars, or pyarrow).
         measurement: Measurement name (not used in output, just for validation).
         time_column: Name of the timestamp column.
-        tag_columns: Accepted for API stability but currently a no-op. The
-            columnar MessagePack write format has no tag/field distinction on the
-            wire (every non-time column is sent as a plain column); Arc derives
-            tag columns server-side from the data. Kept so callers can pass it
-            without breakage and so a future wire format can honor it.
+        tag_columns: Columns that are tags (dimensions) rather than fields.
+            Validated here (each must be a column of ``df`` other than the time
+            column); the caller sends them as the payload's ``tag_keys``, e.g.
+            ``encode_columnar(..., tag_keys=tag_columns)``, which is what
+            ``write_dataframe`` does. Without it Arc stores every non-time
+            column as a field.
 
     Returns:
-        Dictionary of column name to list of values.
+        Dictionary of column name to list of values. The tag/field split is not
+        part of this dict; it travels separately as ``tag_keys``.
 
     Raises:
-        ArcValidationError: If DataFrame is invalid or time column is missing.
+        ArcValidationError: If DataFrame is invalid, the time column is missing,
+            or a tag column is not a non-time column of the DataFrame.
     """
     if tag_columns is None:
         tag_columns = []
+    column_names = list(df.column_names) if hasattr(df, "column_names") else list(df.columns)
+    if tag_columns and time_column not in column_names:
+        raise ArcValidationError(f"Time column '{time_column}' not found in DataFrame")
+    validate_tag_keys(tag_columns, column_names, time_column)
 
     # Detect DataFrame type and convert
     df_type = type(df).__module__

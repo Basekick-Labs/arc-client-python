@@ -9,7 +9,10 @@ from __future__ import annotations
 import threading
 import time
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
+
+from arc_client.exceptions import ArcPartialWriteError
+from arc_client.ingestion.msgpack import validate_tag_keys
 
 if TYPE_CHECKING:
     from arc_client.ingestion.writer import WriteClient
@@ -22,6 +25,23 @@ class BufferedWriter:
     - batch_size records have accumulated for a measurement
     - flush_interval seconds have passed since last flush
     - The context manager exits
+
+    Failure semantics:
+
+    * A write Arc answers with a partial write (``ArcPartialWriteError``,
+      HTTP 400 "partial write: N points dropped") has been applied as far as
+      Arc could apply it. The batch is **discarded**, never resent (a resend
+      would duplicate every stored point), and the error is raised once: by
+      the flush that sent it, or, for a background flush, by the next
+      ``write``/``write_columnar`` call (before it buffers anything) or the
+      next ``flush``/``close`` (after it has flushed the remaining data).
+      The writer stays usable.
+    * Any other failure keeps the batch and makes the writer terminal: later
+      calls raise that failure and nothing is resent, because the server-side
+      outcome may be unknown.
+
+    Tags passed in ``write(record)["tags"]`` and ``write_columnar(...,
+    tag_columns=...)`` are sent as the batch's ``tag_keys``.
 
     Example:
         >>> with client.write.buffered(batch_size=10000) as buffer:
@@ -60,6 +80,11 @@ class BufferedWriter:
         self._closed = False
         self._closing = False
         self._flush_error: BaseException | None = None
+        # A partial write from a background flush, reported once by the next
+        # foreground call (see the class docstring).
+        self._partial_error: Optional[ArcPartialWriteError] = None
+        # Columns sent as tag_keys, per measurement, in first-seen order.
+        self._tag_keys: dict[str, dict[str, None]] = defaultdict(dict)
 
         # Background timer that flushes on flush_interval even when no writes
         # arrive. Started on __enter__ and torn down on close().
@@ -106,6 +131,8 @@ class BufferedWriter:
                 raise RuntimeError("Buffered writer is closed")
             self._buffers[measurement].append(columns)
             self._record_counts[measurement] += 1
+            for key in tags:
+                self._tag_keys[measurement][key] = None
 
             # Check if we should flush this measurement
             if self._record_counts[measurement] >= self._batch_size:
@@ -119,15 +146,19 @@ class BufferedWriter:
         self,
         measurement: str,
         columns: dict[str, list[Any]],
+        tag_columns: Optional[list[str]] = None,
     ) -> None:
         """Write columnar data to the buffer.
 
         Args:
             measurement: The measurement name.
             columns: Dictionary of column name to value list.
+            tag_columns: Columns of ``columns`` that are tags; sent as the
+                batch's ``tag_keys``.
         """
         if not columns:
             return
+        validate_tag_keys(tag_columns, columns)
 
         num_records = len(next(iter(columns.values())))
 
@@ -137,6 +168,8 @@ class BufferedWriter:
                 raise RuntimeError("Buffered writer is closed")
             self._buffers[measurement].append(columns)
             self._record_counts[measurement] += num_records
+            for key in tag_columns or ():
+                self._tag_keys[measurement][key] = None
 
             # Check if we should flush this measurement
             if self._record_counts[measurement] >= self._batch_size:
@@ -152,9 +185,14 @@ class BufferedWriter:
         A failed write leaves its data pending and makes the buffer terminal:
         subsequent flush/close calls raise that failure without retrying data
         whose server outcome may be unknown. Producers wait while I/O runs.
+
+        A partial write (``ArcPartialWriteError``) is the exception: its batch
+        is discarded and the error raised once, after the other measurements
+        were flushed.
         """
         with self._lock:
             self._flush_all()
+            self._raise_pending_partial()
 
     def _start_flush_thread(self) -> None:
         """Start the background flush timer (idempotent)."""
@@ -177,7 +215,12 @@ class BufferedWriter:
                         self._buffers
                         and time.monotonic() - self._last_flush_time >= self._flush_interval
                     ):
-                        self._flush_all()
+                        try:
+                            self._flush_all()
+                        except ArcPartialWriteError as error:
+                            # Batch already discarded; report it once from the
+                            # foreground and keep the timer running.
+                            self._partial_error = error
         except Exception as error:
             # Keep the error observable on foreground operations; never retry
             # an uncertain write automatically from the background thread.
@@ -185,8 +228,21 @@ class BufferedWriter:
                 self._flush_error = error
 
     def _raise_if_failed(self) -> None:
+        """Raise a terminal failure, then a pending partial write (once)."""
         if self._flush_error is not None:
             raise self._flush_error
+        self._raise_pending_partial()
+
+    def _raise_pending_partial(self) -> None:
+        error, self._partial_error = self._partial_error, None
+        if error is not None:
+            raise error
+
+    def _discard(self, measurement: str) -> None:
+        """Drop a measurement's buffered batch. Must hold lock."""
+        self._buffers[measurement] = []
+        self._record_counts[measurement] = 0
+        self._tag_keys.pop(measurement, None)
 
     def _flush_measurement(self, measurement: str) -> None:
         """Flush a single measurement's buffer. Must hold lock."""
@@ -199,22 +255,41 @@ class BufferedWriter:
         # Keep ownership and data until the write is acknowledged. Holding
         # the lock across I/O serializes timer, manual, and close flushes.
         try:
-            self._client.write_columnar(measurement, merged)
+            tags = list(self._tag_keys.get(measurement, ()))
+            if tags:
+                self._client.write_columnar(measurement, merged, tag_columns=tags)
+            else:
+                self._client.write_columnar(measurement, merged)
+        except ArcPartialWriteError:
+            # Arc stored what it could; resending would duplicate it.
+            self._discard(measurement)
+            self._last_flush_time = time.monotonic()
+            raise
         except BaseException as error:
             self._flush_error = error
             raise
-        self._buffers[measurement] = []
-        self._record_counts[measurement] = 0
+        self._discard(measurement)
 
         self._last_flush_time = time.monotonic()
 
     def _flush_all(self) -> None:
-        """Flush all measurements. Must hold lock."""
-        self._raise_if_failed()
+        """Flush all measurements. Must hold lock.
+
+        A partial write does not stop the other measurements from flushing; the
+        first one is raised after they have been sent.
+        """
+        if self._flush_error is not None:
+            raise self._flush_error
+        partial: Optional[ArcPartialWriteError] = None
         measurements = list(self._buffers.keys())
         for measurement in measurements:
             if self._buffers[measurement]:
-                self._flush_measurement(measurement)
+                try:
+                    self._flush_measurement(measurement)
+                except ArcPartialWriteError as error:
+                    partial = partial or error
+        if partial is not None:
+            raise partial
 
     def _merge_columnar(self, batches: list[dict[str, list[Any]]]) -> dict[str, list[Any]]:
         """Merge multiple columnar batches into one.
@@ -261,8 +336,14 @@ class BufferedWriter:
             self._flush_thread = None
 
         with self._lock:
-            self._flush_all()
+            try:
+                self._flush_all()
+            except ArcPartialWriteError:
+                # Everything was flushed or discarded; the writer is done.
+                self._closed = True
+                raise
             self._closed = True
+            self._raise_pending_partial()
 
     def __enter__(self) -> BufferedWriter:
         """Enter context manager."""
