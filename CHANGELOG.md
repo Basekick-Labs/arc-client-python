@@ -149,9 +149,10 @@ plus bug fixes and the first real HTTP-layer test coverage.
 ### Fixed
 
 - Query POSTs (`query`, `query_arrow`, `query_msgpack`, `estimate`) now retry
-  503 with `Retry-After`. A governance 429 is raised at once. Arc sends these during replication catch-up,
-  for a vanished partition, and when the cold tier is unavailable. A
-  transport failure mid-response is still not replayed.
+  503 with `Retry-After`, which Arc sends during replication catch-up, for a
+  vanished partition, and when the cold tier is unavailable. A governance 429
+  (rate limit or quota) is raised at once. A transport failure mid-response
+  is still not replayed.
 - Query and write clients no longer hide typed errors. Auth, permission,
   scoped-access, license, rate-limit and not-supported errors surface as
   themselves.
