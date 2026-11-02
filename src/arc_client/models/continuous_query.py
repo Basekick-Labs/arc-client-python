@@ -39,7 +39,16 @@ class ContinuousQuery(BaseModel):
 
 
 class ExecuteCQResponse(BaseModel):
-    """Response from executing a continuous query."""
+    """Response from executing a continuous query.
+
+    Attributes:
+        watermark_status: In a cluster that adopted continuous queries, what
+            this manual run did to ``last_processed_time``: ``"set"``,
+            ``"moved"`` (another run or the primary moved it meanwhile and
+            theirs is kept) or ``"pending"`` (the cluster has not taken it
+            yet; the next run settles it). ``None`` otherwise, and always on
+            servers before Arc 2027.01.1.
+    """
 
     query_id: int
     query_name: str
@@ -55,6 +64,7 @@ class ExecuteCQResponse(BaseModel):
     executed_at: Optional[str] = None
     executed_query: Optional[str] = None
     error: Optional[str] = None
+    watermark_status: Optional[str] = None
 
 
 class CQExecution(BaseModel):
