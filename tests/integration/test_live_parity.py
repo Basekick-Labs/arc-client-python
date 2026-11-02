@@ -49,6 +49,7 @@ from __future__ import annotations
 import contextlib
 import glob
 import os
+import shutil
 import threading
 import time
 import uuid
@@ -835,11 +836,35 @@ def test_databases_delete_allow_unreachable(admin: ArcClient) -> None:
         admin.databases.get(name)
 
 
+def test_deleted_database_not_listed(admin: ArcClient) -> None:
+    """After ``databases.delete`` the database must not be listed any more.
+
+    On local storage Arc lists databases from directories
+    (internal/api/databases.go listDatabases), and a delete removes the files
+    but leaves the empty directory tree, so ``list()`` keeps showing a
+    database that ``get()`` answers 404 for.
+    """
+    name = uid("sdk_dblist")
+    admin.databases.create(name)
+    admin.write.write_columnar("m", {"time": [int(time.time() * 1e6)], "v": [1.0]}, database=name)
+    server_flush()
+    admin.databases.delete(name, confirm=True)
+    with pytest.raises(ArcNotFoundError):
+        admin.databases.get(name)
+    listed = [d for d in admin.databases.list().databases if d.name == name]
+    assert not listed, f"deleted database still listed: {listed}"
+
+
 async def test_async_databases(aadmin: AsyncArcClient, seeded: tuple[str, str, int]) -> None:
     db, measurement, _ = seeded
     schema = await aadmin.databases.get_measurement_schema(db, measurement)
     assert any(f.name == "usage" for f in schema.fields)
     assert (await aadmin.databases.get(db)).name == db
+    preview = await aadmin.delete.delete(
+        db, measurement, "host = 'b'", dry_run=True, allow_unreachable=True
+    )
+    assert preview.dry_run is True and preview.deleted_count == 1
+    assert (await aadmin.delete.get_config()).enabled is True
 
 
 # --------------------------------------------------------------------------
@@ -1436,6 +1461,7 @@ def test_edge_bundle_export_import_ack(hub: ArcClient, spoke: ArcClient) -> None
     acked = spoke.edge_sync.apply_ack(bundle_path)
     assert acked.get("applied") is True, acked
     assert spoke.edge_sync.spoke_status().get("exported", 0) == exported_before
+    shutil.rmtree(out, ignore_errors=True)
 
 
 @needs_bundle
@@ -1455,6 +1481,8 @@ def test_edge_bundle_revert_and_empty_export(spoke: ArcClient) -> None:
     os.makedirs(empty_dir, exist_ok=True)
     empty = spoke.edge_sync.export_bundle(empty_dir)
     assert empty.get("exported") is False, empty
+    shutil.rmtree(out, ignore_errors=True)
+    shutil.rmtree(empty_dir, ignore_errors=True)
 
 
 @needs_spoke
