@@ -113,7 +113,7 @@ plus bug fixes and the first real HTTP-layer test coverage.
   connection/transport failures, 429 (honoring `Retry-After`) and 503. Mutations
   retry only connection establishment; data DELETE never retries. Configure
   via `max_retries` / `retry_backoff`.
-- New exceptions: `ArcNotSupportedError` (501) and `ArcLicenseError` (403/503 for a
+- New exceptions: `ArcNotSupportedError` (501) and `ArcLicenseError` (403 for a
   missing enterprise-license feature; subclass of `ArcAuthenticationError`).
 - `ArcPermissionError` (403: the token lacks the permission the endpoint
   requires), `ArcScopedAccessError` (403 from Arc's per-database check: the

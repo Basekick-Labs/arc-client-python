@@ -7,7 +7,6 @@ from pytest_httpx import HTTPXMock
 
 from arc_client import ArcClient, AsyncArcClient
 from arc_client.exceptions import (
-    ArcLicenseError,
     ArcPermissionError,
     ArcServerError,
     ArcValidationError,
@@ -63,10 +62,9 @@ async def test_retention_trigger_requires_explicit_confirmation(
     httpx_mock: HTTPXMock, async_mode: bool
 ) -> None:
     if async_mode:
-        async with AsyncArcClient(host="h", token="t", max_retries=0) as client, pytest.raises(
-            ArcValidationError, match="confirm=True"
-        ):
-            await client.schedulers.trigger_retention()
+        async with AsyncArcClient(host="h", token="t", max_retries=0) as client:
+            with pytest.raises(ArcValidationError, match="confirm=True"):
+                await client.schedulers.trigger_retention()
     else:
         with ArcClient(host="h", token="t", max_retries=0) as client, pytest.raises(
             ArcValidationError, match="confirm=True"
@@ -100,7 +98,7 @@ async def test_scheduler_controls_preserve_permission_and_server_errors(
 
 
 @pytest.mark.parametrize("async_mode", [False, True])
-async def test_scheduler_license_required_503_maps_to_license_error(
+async def test_scheduler_license_required_503_remains_server_error(
     httpx_mock: HTTPXMock, async_mode: bool
 ) -> None:
     httpx_mock.add_response(
@@ -109,9 +107,11 @@ async def test_scheduler_license_required_503_maps_to_license_error(
 
     if async_mode:
         async with AsyncArcClient(host="h", token="t", max_retries=0) as client:
-            with pytest.raises(ArcLicenseError, match="Enterprise license required"):
+            with pytest.raises(ArcServerError) as error:
                 await client.schedulers.reload_continuous_queries()
     else:
         with ArcClient(host="h", token="t", max_retries=0) as client:
-            with pytest.raises(ArcLicenseError, match="Enterprise license required"):
+            with pytest.raises(ArcServerError) as error:
                 client.schedulers.reload_continuous_queries()
+
+    assert error.value.status_code == 503
