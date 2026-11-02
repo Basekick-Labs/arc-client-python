@@ -6,8 +6,10 @@ from typing import Any, Optional
 
 from arc_client.compression import Compression
 from arc_client.config import ClientConfig
+from arc_client.exceptions import ArcServerError
 from arc_client.http.async_http import AsyncHTTPClient
-from arc_client.models.common import HealthResponse
+from arc_client.http.base import never_retry_status
+from arc_client.models.common import HealthResponse, ReadyResponse
 
 
 class AsyncArcClient:
@@ -273,14 +275,56 @@ class AsyncArcClient:
     async def ready(self) -> bool:
         """Check if server is ready to accept requests.
 
+        A single probe: a 503 "not ready" answer is not retried. Use
+        :meth:`readiness` for the reason.
+
         Returns:
-            True if server is ready, False otherwise.
+            True if server is ready, False otherwise (including when it cannot
+            be reached).
         """
         try:
-            response = await self._get_http().get("/ready")
-            return response.status_code == 200
+            return (await self.readiness()).ready
         except Exception:
             return False
+
+    async def readiness(self) -> ReadyResponse:
+        """Ask ``/ready`` whether this node should receive traffic, and why not.
+
+        Arc answers 503 while starting up, replaying its WAL or shutting down,
+        and (with ``server.storage_credentials_fail_ready``) while a storage
+        tier's credentials are expired or unavailable; ``reason`` and ``tier``
+        say which. The 503 is returned as ``ready=False``, not raised, and not
+        retried.
+
+        Raises:
+            ArcConnectionError: If the server cannot be reached.
+        """
+        return await self._readiness("/ready")
+
+    async def write_readiness(self) -> ReadyResponse:
+        """Ask ``/ready/write`` whether writes should be routed to this node.
+
+        Strictly narrower than :meth:`readiness`: a reader, or a writer that is
+        not the primary in local-storage cluster mode, answers
+        ``status="not_write_target"``.
+
+        Raises:
+            ArcConnectionError: If the server cannot be reached.
+        """
+        return await self._readiness("/ready/write")
+
+    async def _readiness(self, path: str) -> ReadyResponse:
+        try:
+            response = await self._get_http().get(path, retry_if=never_retry_status)
+        except ArcServerError as error:
+            if error.status_code != 503:
+                raise
+            return _ready_response(False, error.response_body)
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        return _ready_response(True, body)
 
     async def close(self) -> None:
         """Close the client and release resources."""
@@ -298,3 +342,10 @@ class AsyncArcClient:
 
     def __repr__(self) -> str:
         return f"AsyncArcClient(host={self._config.host!r}, port={self._config.port})"
+
+
+def _ready_response(ready: bool, body: object) -> ReadyResponse:
+    data = dict(body) if isinstance(body, dict) else {}
+    data["ready"] = ready
+    data.setdefault("message", data.get("reason"))
+    return ReadyResponse.model_validate(data)

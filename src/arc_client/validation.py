@@ -7,6 +7,7 @@ clear error (and never reach a SQL string via interpolation).
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 
 from arc_client.exceptions import ArcValidationError
 
@@ -39,3 +40,22 @@ def validate_name(name: str, kind: str = "name") -> str:
             "letters, digits, underscores, or hyphens (max 64 characters)."
         )
     return name
+
+
+def path_segment(name: str, kind: str = "name") -> str:
+    """Validate a name used as one URL path segment and percent-encode it.
+
+    Looser than :func:`validate_name`, matching Arc's per-name storage-segment
+    rule (internal/api/databases.go isSafeStoragePathSegment): routes such as
+    the measurement schema must still resolve names an older release or a
+    spoke pseudo-database uses. Rejects what can never be one segment: an empty
+    name, a ``/`` or a leading ``.``.
+
+    Raises:
+        ArcValidationError: If ``name`` cannot be a single path segment.
+    """
+    if not isinstance(name, str) or not name or "/" in name or name.startswith("."):
+        raise ArcValidationError(
+            f"Invalid {kind} {name!r}: must be non-empty, contain no '/', and not start with '.'"
+        )
+    return quote(name, safe="")
