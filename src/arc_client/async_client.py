@@ -98,6 +98,9 @@ class AsyncArcClient:
         self._tiering: Any = None
         self._backup: Any = None
         self._mqtt: Any = None
+        self._edge_sync: Any = None
+        self._diagnostics: Any = None
+        self._reconciliation: Any = None
 
     def _get_http(self) -> AsyncHTTPClient:
         """Get or create the HTTP client."""
@@ -264,6 +267,33 @@ class AsyncArcClient:
 
             self._mqtt = AsyncMQTTClient(self._get_http(), self._config)
         return self._mqtt
+
+    @property
+    def reconciliation(self) -> Any:
+        """Get the async manifest/storage reconciliation client (enterprise)."""
+        if self._reconciliation is None:
+            from arc_client.management.async_reconciliation import AsyncReconciliationClient
+
+            self._reconciliation = AsyncReconciliationClient(self._get_http(), self._config)
+        return self._reconciliation
+
+    @property
+    def diagnostics(self) -> Any:
+        """Get the async operational diagnostics client (readiness, metrics, logs, memory)."""
+        if self._diagnostics is None:
+            from arc_client.management.async_diagnostics import AsyncDiagnosticsClient
+
+            self._diagnostics = AsyncDiagnosticsClient(self._get_http(), self._config)
+        return self._diagnostics
+
+    @property
+    def edge_sync(self) -> Any:
+        """Get the async edge-sync administration client (hub spokes/import, spoke sync/export)."""
+        if self._edge_sync is None:
+            from arc_client.management.async_edge_sync import AsyncEdgeSyncClient
+
+            self._edge_sync = AsyncEdgeSyncClient(self._get_http(), self._config)
+        return self._edge_sync
 
     async def health(self) -> HealthResponse:
         """Check server health.

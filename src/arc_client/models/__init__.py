@@ -28,6 +28,8 @@ from arc_client.models.database import (
     SchemaRebuildResponse,
 )
 from arc_client.models.delete import DeleteConfigResponse, DeleteResponse
+from arc_client.models.diagnostics import ReadinessStatus
+from arc_client.models.edge_sync import Spoke, SpokeSecret
 from arc_client.models.import_ import (
     ImportResult,
     ImportStats,
@@ -40,6 +42,7 @@ from arc_client.models.query import (
     QueryProfile,
     QueryResponse,
 )
+from arc_client.models.reconciliation import ReconciliationRun
 from arc_client.models.retention import (
     ExecuteRetentionResponse,
     RetentionExecution,
@@ -72,10 +75,14 @@ __all__ = [
     "MeasurementInfo",
     "QueryProfile",
     "QueryResponse",
+    "ReadinessStatus",
+    "ReconciliationRun",
     "ReadyResponse",
     "RetentionExecution",
     "RetentionPolicy",
     "RotateTokenResponse",
+    "Spoke",
+    "SpokeSecret",
     "TokenInfo",
     "TokenListResponse",
     "VerifyResponse",

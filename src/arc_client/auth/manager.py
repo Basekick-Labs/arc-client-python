@@ -189,3 +189,40 @@ class AuthClient:
             raise
         except Exception as e:
             raise ArcAuthenticationError(f"Failed to revoke token: {e}") from e
+
+    def cache_stats(self) -> dict[str, Any]:
+        """Get the server's token-validation cache statistics (admin).
+
+        Returns the inner ``stats`` object as a raw dict (operator
+        diagnostics): ``cache_size``, ``max_cache_size``,
+        ``cache_ttl_seconds``, ``utilization_percent``, ``total_requests``,
+        ``cache_hits``, ``cache_misses``, ``cache_evictions`` and
+        ``hit_rate_percent``. The cache is per node.
+        """
+        data = self._admin_json("get", "/api/v1/auth/cache/stats")
+        stats = data.get("stats")
+        if not isinstance(stats, dict):
+            raise ArcError(f"Unexpected auth cache stats response: {data!r}")
+        return stats
+
+    def invalidate_cache(self) -> dict[str, Any]:
+        """Clear the server's token-validation cache on this node (admin).
+
+        Loses no data and needs no ``confirm``: the next request for each
+        token is validated against the token store again, which costs one
+        lookup per token. Use it to make a token change take effect before
+        the cache TTL expires. Returns ``{"success": true, "message": ...}``.
+        """
+        return self._admin_json("post", "/api/v1/auth/cache/invalidate")
+
+    def _admin_json(self, method: str, path: str) -> dict[str, Any]:
+        try:
+            response = getattr(self._http, method)(path)
+            data = response.json()
+        except ArcError:
+            raise
+        except Exception as e:
+            raise ArcError(f"Auth cache request failed ({method.upper()} {path}): {e}") from e
+        if not isinstance(data, dict):
+            raise ArcError(f"Unexpected response from {path}: {data!r}")
+        return data
