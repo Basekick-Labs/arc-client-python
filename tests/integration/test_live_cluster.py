@@ -675,9 +675,17 @@ def test_scoped_backup_and_restore_modes(cluster: Cluster) -> None:
             )
             assert final["status"] == "completed", final
         # Arc's default for a scoped backup on a cluster node is replace.
+        previous = latest()["started_at"]
         default = node.backup.restore(backup_id, confirm=True)
         assert default["mode"] == "replace"
-        wait_for(latest, lambda s: s.get("status") == "completed", what="default restore")
+        final = wait_for(
+            latest,
+            lambda s: s.get("started_at") != previous
+            and s.get("status") in ("completed", "failed"),
+            what="default restore",
+        )
+        assert final["mode"] == "replace"
+        assert final["status"] == "completed", final
         # The restored data is in the manifest again.
         assert cluster.leader().cluster.files(database=db)["total"] >= 1
     finally:
