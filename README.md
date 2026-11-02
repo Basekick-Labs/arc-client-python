@@ -509,6 +509,33 @@ except ArcConnectionError as e:
     print(f"Connection failed: {e}")
 ```
 
+## Privacy
+
+The SDK connects only to the Arc server you configure. It never contacts
+Basekick or any other service on its own.
+
+Requests identify the SDK version, the Python version and the OS/architecture
+in `User-Agent`. They also carry a random installation ID
+(`Arc-Client-Installation-Id`), created on first use and stored in
+`~/.config/arc-client-python/installation-id` (`%APPDATA%` on Windows). Arc may
+include this ID in its own opt-out telemetry so Basekick can count SDK
+installations across Arc servers. The ID is not derived from your machine, user
+or token, and nothing about your queries, databases or data is included.
+
+Disable the ID with any of:
+
+```bash
+DO_NOT_TRACK=1
+ARC_CLIENT_SEND_INSTALLATION_ID=0
+```
+
+```python
+ArcClient(host="localhost", token="...", send_installation_id=False)
+```
+
+In ephemeral containers, set `ARC_CLIENT_INSTALLATION_ID` to a fixed UUID so
+each start is not counted as a new installation.
+
 ## Documentation
 
 See the [full documentation](https://docs.basekick.net/arc/sdks/python]) for detailed guides and API reference.

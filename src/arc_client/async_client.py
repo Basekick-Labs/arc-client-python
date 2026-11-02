@@ -42,6 +42,7 @@ class AsyncArcClient:
         verify_ssl: bool = True,
         max_retries: int = 3,
         retry_backoff: float = 0.5,
+        send_installation_id: bool = True,
     ) -> None:
         """Initialize the async Arc client.
 
@@ -58,6 +59,9 @@ class AsyncArcClient:
             max_retries: Max automatic retries for transient failures
                 (connection errors, 429, 503). 0 disables retries.
             retry_backoff: Base backoff (seconds) for exponential retry.
+            send_installation_id: Send a random per-installation id so Arc's
+                opt-out telemetry can count SDK installations. Nothing about
+                requests or data is included. DO_NOT_TRACK=1 also disables it.
         """
         self._config = ClientConfig(
             host=host,
@@ -70,6 +74,7 @@ class AsyncArcClient:
             verify_ssl=verify_ssl,
             max_retries=max_retries,
             retry_backoff=retry_backoff,
+            send_installation_id=send_installation_id,
         )
         self._http: Optional[AsyncHTTPClient] = None
 

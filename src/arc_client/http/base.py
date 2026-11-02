@@ -8,7 +8,11 @@ from typing import Any, Optional
 
 import httpx
 
-from arc_client import __version__
+from arc_client._installation import (
+    HEADER_INSTALLATION_ID,
+    outbound_installation_id,
+    user_agent,
+)
 from arc_client.config import ClientConfig
 from arc_client.exceptions import (
     ArcAuthenticationError,
@@ -24,7 +28,7 @@ from arc_client.exceptions import (
     ArcServerError,
 )
 
-USER_AGENT = f"arc-client-python/{__version__}"
+USER_AGENT = user_agent()
 
 
 def build_headers(
@@ -38,6 +42,9 @@ def build_headers(
         headers["Authorization"] = f"Bearer {config.token}"
     if config.database:
         headers["x-arc-database"] = config.database
+    installation_id = outbound_installation_id(config.send_installation_id)
+    if installation_id:
+        headers[HEADER_INSTALLATION_ID] = installation_id
     if extra_headers:
         headers.update(extra_headers)
     return headers

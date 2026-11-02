@@ -6,7 +6,19 @@ import os
 
 import pytest
 
-from arc_client import ArcClient, AsyncArcClient
+from arc_client import ArcClient, AsyncArcClient, _installation
+
+
+@pytest.fixture(autouse=True)
+def _isolated_installation_id(tmp_path, monkeypatch):
+    """Keep tests from reading or minting the real installation id in $HOME."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "appdata"))
+    for name in ("DO_NOT_TRACK", "ARC_CLIENT_SEND_INSTALLATION_ID", "ARC_CLIENT_INSTALLATION_ID"):
+        monkeypatch.delenv(name, raising=False)
+    _installation._reset_for_tests()
+    yield
+    _installation._reset_for_tests()
 
 
 @pytest.fixture

@@ -12,6 +12,14 @@ plus bug fixes and the first real HTTP-layer test coverage.
 
 ### Added
 
+- **Installation ID for Arc's client telemetry.** Requests carry a random
+  per-installation `Arc-Client-Installation-Id` and a `User-Agent` that names
+  the Python version and platform, so Arc's opt-out telemetry can count SDK
+  installations the same way it counts arcli. The SDK itself still talks only
+  to the configured Arc server. Opt out with `DO_NOT_TRACK=1`,
+  `ARC_CLIENT_SEND_INSTALLATION_ID=0` or `send_installation_id=False`; pin the
+  ID in containers with `ARC_CLIENT_INSTALLATION_ID`. See README, "Privacy".
+
 - Arrow completion metadata in the existing `pyarrow.Table` schema for sync and
   async queries: policy cap and execution time are retained; failed, malformed,
   conflicting or unobservable announced completion metadata is rejected.
