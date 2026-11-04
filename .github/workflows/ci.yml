@@ -10,6 +10,27 @@ env:
   UV_PYTHON: "3.11"
 
 jobs:
+  query-wheel:
+    name: Query contracts (installed wheel)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - run: uv python install 3.11
+      - name: Build and install the candidate wheel
+        run: |
+          uv build --wheel --out-dir "$RUNNER_TEMP/query-wheel-dist"
+          sha256sum "$RUNNER_TEMP"/query-wheel-dist/*.whl
+          uv venv --python 3.11 "$RUNNER_TEMP/query-wheel-env"
+          wheel=("$RUNNER_TEMP"/query-wheel-dist/*.whl)
+          test "${#wheel[@]}" -eq 1
+          uv pip install --python "$RUNNER_TEMP/query-wheel-env/bin/python" "${wheel[0]}[dev]"
+      - name: Verify query contracts outside the source package
+        run: |
+          "$RUNNER_TEMP/query-wheel-env/bin/python" -I scripts/check_query_wheel.py
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
