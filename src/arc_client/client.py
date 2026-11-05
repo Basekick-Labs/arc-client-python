@@ -287,7 +287,7 @@ class ArcClient:
 
     @property
     def diagnostics(self) -> Any:
-        """Get the operational diagnostics client (readiness, metrics, logs, memory)."""
+        """Get the operational diagnostics client (metrics, write protocols, logs, memory)."""
         if self._diagnostics is None:
             from arc_client.management.diagnostics import DiagnosticsClient
 

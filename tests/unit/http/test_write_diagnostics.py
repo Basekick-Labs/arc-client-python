@@ -1,4 +1,4 @@
-"""HTTP contract tests for Line Protocol and MessagePack diagnostics."""
+"""HTTP contract tests for the Line Protocol and MessagePack diagnostics on client.diagnostics."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pytest
 from pytest_httpx import HTTPXMock
 
 from arc_client import ArcClient, AsyncArcClient
-from arc_client.exceptions import ArcPermissionError, ArcServerError
+from arc_client.exceptions import ArcAuthenticationError, ArcError, ArcServerError
 
 
 @pytest.mark.parametrize("async_mode", [False, True])
@@ -37,7 +37,7 @@ async def test_write_protocol_diagnostics(httpx_mock: HTTPXMock, async_mode: boo
 
     if async_mode:
         async with AsyncArcClient(host="h", token="t", max_retries=0) as client:
-            diagnostics = client.write_diagnostics
+            diagnostics = client.diagnostics
             results = [
                 await diagnostics.line_protocol_health(),
                 await diagnostics.line_protocol_stats(),
@@ -46,7 +46,7 @@ async def test_write_protocol_diagnostics(httpx_mock: HTTPXMock, async_mode: boo
             ]
     else:
         with ArcClient(host="h", token="t", max_retries=0) as client:
-            diagnostics = client.write_diagnostics
+            diagnostics = client.diagnostics
             results = [
                 diagnostics.line_protocol_health(),
                 diagnostics.line_protocol_stats(),
@@ -63,25 +63,42 @@ async def test_write_protocol_diagnostics(httpx_mock: HTTPXMock, async_mode: boo
 
 
 @pytest.mark.parametrize("async_mode", [False, True])
-async def test_write_diagnostics_preserve_permission_and_server_errors(
+async def test_write_diagnostics_preserve_auth_and_server_errors(
     httpx_mock: HTTPXMock, async_mode: bool
 ) -> None:
-    httpx_mock.add_response(status_code=403, json={"error": "Authentication required"})
+    httpx_mock.add_response(
+        status_code=401, json={"success": False, "error": "Authentication required"}
+    )
     httpx_mock.add_response(status_code=503, json={"error": "Writer unavailable"})
 
     if async_mode:
         async with AsyncArcClient(host="h", token="t", max_retries=0) as client:
-            with pytest.raises(ArcPermissionError) as permission_error:
-                await client.write_diagnostics.line_protocol_health()
+            with pytest.raises(ArcAuthenticationError) as auth_error:
+                await client.diagnostics.line_protocol_health()
             with pytest.raises(ArcServerError) as error:
-                await client.write_diagnostics.msgpack_stats()
+                await client.diagnostics.msgpack_stats()
     else:
         with ArcClient(host="h", token="t", max_retries=0) as client:
-            with pytest.raises(ArcPermissionError) as permission_error:
-                client.write_diagnostics.line_protocol_health()
+            with pytest.raises(ArcAuthenticationError) as auth_error:
+                client.diagnostics.line_protocol_health()
             with pytest.raises(ArcServerError) as error:
-                client.write_diagnostics.msgpack_stats()
+                client.diagnostics.msgpack_stats()
 
-    assert permission_error.value.response_body == {"error": "Authentication required"}
+    assert auth_error.value.response_body == {"success": False, "error": "Authentication required"}
     assert error.value.status_code == 503
     assert error.value.response_body == {"error": "Writer unavailable"}
+
+
+@pytest.mark.parametrize("async_mode", [False, True])
+async def test_write_diagnostics_reject_non_object_json(
+    httpx_mock: HTTPXMock, async_mode: bool
+) -> None:
+    httpx_mock.add_response(json=["not", "an", "object"])
+
+    with pytest.raises(ArcError, match="Unexpected response"):
+        if async_mode:
+            async with AsyncArcClient(host="h", token="t", max_retries=0) as client:
+                await client.diagnostics.msgpack_spec()
+        else:
+            with ArcClient(host="h", token="t", max_retries=0) as client:
+                client.diagnostics.msgpack_spec()
