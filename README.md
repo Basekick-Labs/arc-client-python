@@ -6,15 +6,6 @@ Python SDK for [Arc](https://github.com/basekick-labs/arc) time-series database.
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-
-This README describes SDK development revision `539505c` (`0.2.0`, unreleased).
-The latest published SDK release, `0.1.2`, does not include the management and
-completion-metadata changes below. To reproduce these examples, install this revision:
-
-```bash
-pip install 'arc-tsdb-client @ git+https://github.com/Basekick-Labs/arc-client-python.git@539505c0b0f2113b1acbbe5b406abef89ec5b6fe'
-```
-
 ## Installation
 
 ```bash
@@ -37,6 +28,9 @@ uv add arc-tsdb-client
 uv add arc-tsdb-client --extra pandas
 uv add arc-tsdb-client --extra all
 ```
+
+This README documents `arc-tsdb-client` 0.2.0. Earlier releases lack many of the
+APIs below.
 
 ## Quick Start
 
@@ -697,8 +691,7 @@ The SDK distinguishes partial updates from complete replacements:
   overwrites the whole definition; coordinate concurrent edits before calling it.
 
 There is no server-capability guessing or retry with a different update payload.
-Both sync and async clients provide the same methods. Other Arc releases are
-still being validated; this is not a compatibility guarantee for every release. CQ replacements include
+Both sync and async clients provide the same methods. CQ replacements include
 `tag_columns`; retention replacements include `database`, `measurement`, and `buffer_days`.
 
 Query results retain `truncated`, `truncation_reason`, `rows_capped`, and `row_cap`
@@ -725,5 +718,5 @@ the server and use the qualified source measurement, such as `default.cpu`,
 as shown in the CQ example above.
 
 A client timeout does not confirm cancellation of retention work. Check execution
-history and resulting data before submitting it again. On affected server versions,
-running executions may be absent from history until completion.
+history and resulting data before submitting it again. On Arc 26.09.3 and earlier,
+a running execution is missing from that history until it finishes (fixed in Arc 27.01.1).
