@@ -28,6 +28,14 @@ plus bug fixes and the first real HTTP-layer test coverage.
   - `tag_columns=` on `write_columnar`/`write_dataframe` and buffered writes,
     sent as msgpack `tag_keys`.
 - **Query path.**
+  - Result completeness (Arc#726): `QueryResponse.truncated` and
+    `truncation_reason` say Arc's stream failed part way, so `data` is missing
+    rows and must not be treated as the full result. `query()` returns them
+    rather than raising, so check `truncated` before using `data`.
+    `rows_capped` and `row_cap` say a governance row cap stopped the query:
+    the result is valid up to the cap. On Arrow, a truncated stream raises
+    `ArcQueryError` and the cap is in the schema metadata (`arc.rows_capped`,
+    `arc.row_cap`); on MessagePack, an incomplete body raises `ArcQueryError`.
   - `profile=True` on `query`/`query_msgpack`, returned as `QueryResponse.profile`.
   - `dictionary=`/`compression=` Arrow wire options.
   - `QueryResponse.query_id`, and `arc.query_id` in the Arrow schema metadata,
