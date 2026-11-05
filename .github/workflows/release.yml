@@ -6,9 +6,13 @@ on:
       - "v*"
 
 jobs:
-  # Run CI first - reuse the CI workflow
+  # Run CI first - reuse the CI workflow. Without macOS: GitHub's macOS
+  # runners can sit queued long enough to stall a release, and every PR and
+  # push to main already runs that job. Run the suite on a Mac before tagging.
   ci:
     uses: ./.github/workflows/ci.yml
+    with:
+      skip_macos: true
 
   build:
     name: Build package

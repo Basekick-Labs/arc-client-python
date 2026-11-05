@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_call:  # Allow release.yml to call this workflow
+    inputs:
+      skip_macos:
+        description: Skip the macOS platform test
+        type: boolean
+        default: false
 
 env:
   UV_PYTHON: "3.11"
@@ -110,6 +115,11 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # release.yml passes skip_macos: true (see there). On push and
+        # pull_request inputs.skip_macos is unset (null == true is false), so
+        # nothing is excluded.
+        exclude:
+          - os: ${{ inputs.skip_macos == true && 'macos-latest' || 'none' }}
 
     steps:
       - uses: actions/checkout@v4
