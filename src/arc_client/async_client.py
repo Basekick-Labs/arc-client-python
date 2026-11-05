@@ -289,7 +289,7 @@ class AsyncArcClient:
 
     @property
     def diagnostics(self) -> Any:
-        """Get the async operational diagnostics client (readiness, metrics, logs, memory)."""
+        """Get the async operational diagnostics client (metrics, write protocols, logs, memory)."""
         if self._diagnostics is None:
             from arc_client.management.async_diagnostics import AsyncDiagnosticsClient
 

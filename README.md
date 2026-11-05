@@ -562,6 +562,11 @@ client.diagnostics.timeseries("api", duration_minutes=15)
 client.diagnostics.logs(level="warn", since_minutes=30, limit=200)
 client.auth.cache_stats()
 
+# Write-protocol counters on this node (any token)
+client.diagnostics.line_protocol_stats()["stats"]["total_errors"]
+client.diagnostics.msgpack_stats()    # MessagePack decoder and Arrow buffer
+client.diagnostics.msgpack_spec()     # the MessagePack write format Arc accepts
+
 # Reconciliation (enterprise clustering): dry run first, then act
 run = client.reconciliation.trigger()                 # dry run
 client.reconciliation.trigger(dry_run=False, confirm=True)

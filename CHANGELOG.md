@@ -64,6 +64,10 @@ plus bug fixes and the first real HTTP-layer test coverage.
   - Public JSON metrics, Prometheus text and timeseries.
   - Admin `logs`, `memstats`, `duckdb_memory` and
     `free_os_memory(confirm=True)`.
+  - Write-protocol diagnostics (any token, Arc 25.12.1+):
+    `line_protocol_stats()`, `msgpack_stats()`, `msgpack_spec()` and
+    `line_protocol_health()`. Arc's Line Protocol health always answers
+    healthy; `write_readiness()` says whether the node takes writes.
   - `auth.cache_stats()` and `auth.invalidate_cache()`.
 - **Edge sync administration** (`client.edge_sync`):
   - Hub: spoke registry and air-gap bundle import.
