@@ -2,7 +2,7 @@
 
 Retention, continuous queries, delete, databases, and the enterprise surface
 (RBAC, governance, audit, query management, cluster, compaction, tiering,
-backup, MQTT).
+backup, MQTT) and operations (reconciliation, diagnostics, edge sync).
 """
 
 from arc_client.management.async_audit import AsyncAuditClient
@@ -12,11 +12,15 @@ from arc_client.management.async_compaction import AsyncCompactionClient
 from arc_client.management.async_continuous_query import AsyncContinuousQueryClient
 from arc_client.management.async_databases import AsyncDatabaseClient
 from arc_client.management.async_delete import AsyncDeleteClient
+from arc_client.management.async_diagnostics import AsyncDiagnosticsClient
+from arc_client.management.async_edge_sync import AsyncEdgeSyncClient
 from arc_client.management.async_governance import AsyncGovernanceClient
 from arc_client.management.async_mqtt import AsyncMQTTClient
 from arc_client.management.async_query_management import AsyncQueryManagementClient
 from arc_client.management.async_rbac import AsyncRBACClient
+from arc_client.management.async_reconciliation import AsyncReconciliationClient
 from arc_client.management.async_retention import AsyncRetentionClient
+from arc_client.management.async_schedulers import AsyncSchedulerClient
 from arc_client.management.async_tiering import AsyncTieringClient
 from arc_client.management.audit import AuditClient
 from arc_client.management.backup import BackupClient
@@ -25,11 +29,15 @@ from arc_client.management.compaction import CompactionClient
 from arc_client.management.continuous_query import ContinuousQueryClient
 from arc_client.management.databases import DatabaseClient
 from arc_client.management.delete import DeleteClient
+from arc_client.management.diagnostics import DiagnosticsClient
+from arc_client.management.edge_sync import EdgeSyncClient
 from arc_client.management.governance import GovernanceClient
 from arc_client.management.mqtt import MQTTClient
 from arc_client.management.query_management import QueryManagementClient
 from arc_client.management.rbac import RBACClient
+from arc_client.management.reconciliation import ReconciliationClient
 from arc_client.management.retention import RetentionClient
+from arc_client.management.schedulers import SchedulerClient
 from arc_client.management.tiering import TieringClient
 
 __all__ = [
@@ -40,6 +48,8 @@ __all__ = [
     "AsyncDeleteClient",
     "RetentionClient",
     "AsyncRetentionClient",
+    "SchedulerClient",
+    "AsyncSchedulerClient",
     "DatabaseClient",
     "AsyncDatabaseClient",
     # Enterprise
@@ -61,4 +71,10 @@ __all__ = [
     "AsyncBackupClient",
     "MQTTClient",
     "AsyncMQTTClient",
+    "ReconciliationClient",
+    "AsyncReconciliationClient",
+    "DiagnosticsClient",
+    "AsyncDiagnosticsClient",
+    "EdgeSyncClient",
+    "AsyncEdgeSyncClient",
 ]

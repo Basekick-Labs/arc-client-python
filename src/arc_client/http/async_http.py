@@ -12,6 +12,7 @@ from arc_client.http.arrow_trailers import capture_async_arrow_trailers
 from arc_client.http.base import (
     RETRYABLE_TRANSPORT_ERRORS,
     HTTPClientBase,
+    RetryPredicate,
     compute_backoff,
     handle_connection_error,
     handle_response_error,
@@ -50,13 +51,26 @@ class AsyncHTTPClient(HTTPClientBase):
         path: str,
         *,
         headers: Optional[dict[str, str]] = None,
+        idempotent: bool = False,
+        retry_if: Optional[RetryPredicate] = None,
         **kwargs: Any,
     ) -> httpx.Response:
         """Send a request with retry/backoff for transient failures.
 
-        Reads retry transient failures up to ``config.max_retries`` times.
-        Mutations retry only connection establishment failures; data DELETE
-        never retries. Unknown write outcomes are returned to the caller.
+        Reads (GET/HEAD/OPTIONS) retry transient transport failures and
+        429/503 responses up to ``config.max_retries`` times. Requests the
+        caller marks ``idempotent=True`` (Arc's query POSTs, which only read)
+        retry 503 (not 429, see below); for transport failures they keep the
+        mutation rule (only connection establishment failures), because a
+        timeout or a connection lost mid-response means Arc already ran the
+        query, and silently re-running it would multiply its cost and hide a
+        truncated stream. Data DELETE never retries. Unknown write outcomes
+        are returned to the caller.
+
+        ``retry_if`` replaces the status-retry rule for this one request: a
+        response for which it returns True is retried (honoring Retry-After),
+        whatever the method. Writes use it to resend only the 503 refusals Arc
+        documents as "nothing was written".
         """
         request_kwargs = self._prepare_request_kwargs(headers=headers, **kwargs)
         client = self._get_client()
@@ -80,11 +94,16 @@ class AsyncHTTPClient(HTTPClientBase):
                 await asyncio.sleep(compute_backoff(attempt, self.config.retry_backoff))
                 continue
 
-            if (
-                read_only
-                and is_retryable_status(response.status_code)
-                and attempt < self.config.max_retries
-            ):
+            if retry_if is not None:
+                retry_status = retry_if(response)
+            else:
+                # Idempotent POSTs (queries) retry only 503: Arc's query 429
+                # is governance (rate limit or quota) with no Retry-After, and
+                # does not clear within a few seconds of backoff.
+                retry_status = (read_only and is_retryable_status(response.status_code)) or (
+                    idempotent and response.status_code == 503
+                )
+            if retry_status and attempt < self.config.max_retries:
                 retry_after = parse_retry_after(response)
                 await asyncio.sleep(
                     compute_backoff(attempt, self.config.retry_backoff, retry_after)
@@ -104,9 +123,10 @@ class AsyncHTTPClient(HTTPClientBase):
         path: str,
         params: Optional[dict[str, Any]] = None,
         headers: Optional[dict[str, str]] = None,
+        retry_if: Optional[RetryPredicate] = None,
     ) -> httpx.Response:
         """Make a GET request."""
-        return await self._request("GET", path, headers=headers, params=params)
+        return await self._request("GET", path, headers=headers, params=params, retry_if=retry_if)
 
     async def post(
         self,
@@ -117,8 +137,16 @@ class AsyncHTTPClient(HTTPClientBase):
         headers: Optional[dict[str, str]] = None,
         files: Optional[Any] = None,
         data: Optional[Any] = None,
+        idempotent: bool = False,
+        retry_if: Optional[RetryPredicate] = None,
+        timeout: Optional[float] = None,
     ) -> httpx.Response:
-        """Make a POST request."""
+        """Make a POST request.
+
+        ``idempotent=True`` marks a POST that only reads (Arc's query
+        endpoints) so it retries like a GET. ``retry_if`` overrides the status
+        retry rule for this request (see ``_request``).
+        """
         extra: dict[str, Any] = {}
         if json is not None:
             extra["json"] = json
@@ -128,7 +156,17 @@ class AsyncHTTPClient(HTTPClientBase):
             extra["files"] = files
         if data is not None:
             extra["data"] = data
-        return await self._request("POST", path, headers=headers, params=params, **extra)
+        if timeout is not None:
+            extra["timeout"] = timeout
+        return await self._request(
+            "POST",
+            path,
+            headers=headers,
+            params=params,
+            idempotent=idempotent,
+            retry_if=retry_if,
+            **extra,
+        )
 
     async def put(
         self,
@@ -161,9 +199,11 @@ class AsyncHTTPClient(HTTPClientBase):
         path: str,
         params: Optional[dict[str, Any]] = None,
         headers: Optional[dict[str, str]] = None,
+        timeout: Optional[float] = None,
     ) -> httpx.Response:
         """Make a DELETE request."""
-        return await self._request("DELETE", path, headers=headers, params=params)
+        extra: dict[str, Any] = {"timeout": timeout} if timeout is not None else {}
+        return await self._request("DELETE", path, headers=headers, params=params, **extra)
 
     async def __aenter__(self) -> AsyncHTTPClient:
         return self

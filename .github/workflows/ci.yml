@@ -10,6 +10,27 @@ env:
   UV_PYTHON: "3.11"
 
 jobs:
+  wheel:
+    name: Unit tests (installed wheel)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+      - run: uv python install 3.11
+      - name: Build and install the candidate wheel
+        run: |
+          uv build --wheel --out-dir "$RUNNER_TEMP/wheel-dist"
+          sha256sum "$RUNNER_TEMP"/wheel-dist/*.whl
+          uv venv --python 3.11 "$RUNNER_TEMP/wheel-env"
+          wheel=("$RUNNER_TEMP"/wheel-dist/*.whl)
+          test "${#wheel[@]}" -eq 1
+          uv pip install --python "$RUNNER_TEMP/wheel-env/bin/python" "${wheel[0]}[dev,all]"
+      - name: Run the unit suite against the installed wheel
+        run: |
+          "$RUNNER_TEMP/wheel-env/bin/python" -I scripts/check_wheel.py
+
   lint:
     name: Lint
     runs-on: ubuntu-latest

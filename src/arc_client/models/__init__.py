@@ -7,7 +7,12 @@ from arc_client.models.auth import (
     TokenListResponse,
     VerifyResponse,
 )
-from arc_client.models.common import HealthResponse, ReadyResponse
+from arc_client.models.common import (
+    HealthResponse,
+    LicenseHealth,
+    ReadyResponse,
+    StorageTierHealth,
+)
 from arc_client.models.continuous_query import (
     ContinuousQuery,
     CQExecution,
@@ -18,15 +23,25 @@ from arc_client.models.database import (
     DatabaseListResponse,
     DatabaseMeasurement,
     MeasurementListResponse,
+    MeasurementSchema,
+    SchemaField,
+    SchemaRebuildResponse,
 )
 from arc_client.models.delete import DeleteConfigResponse, DeleteResponse
+from arc_client.models.edge_sync import Spoke, SpokeSecret
 from arc_client.models.import_ import (
     ImportResult,
     ImportStats,
     LPImportResult,
     TLEImportResult,
 )
-from arc_client.models.query import EstimateResponse, MeasurementInfo, QueryResponse
+from arc_client.models.query import (
+    EstimateResponse,
+    MeasurementInfo,
+    QueryProfile,
+    QueryResponse,
+)
+from arc_client.models.reconciliation import ReconciliationRun
 from arc_client.models.retention import (
     ExecuteRetentionResponse,
     RetentionExecution,
@@ -41,6 +56,9 @@ __all__ = [
     "DatabaseListResponse",
     "DatabaseMeasurement",
     "MeasurementListResponse",
+    "MeasurementSchema",
+    "SchemaField",
+    "SchemaRebuildResponse",
     "ImportResult",
     "ImportStats",
     "LPImportResult",
@@ -51,12 +69,18 @@ __all__ = [
     "ExecuteCQResponse",
     "ExecuteRetentionResponse",
     "HealthResponse",
+    "LicenseHealth",
+    "StorageTierHealth",
     "MeasurementInfo",
+    "QueryProfile",
     "QueryResponse",
+    "ReconciliationRun",
     "ReadyResponse",
     "RetentionExecution",
     "RetentionPolicy",
     "RotateTokenResponse",
+    "Spoke",
+    "SpokeSecret",
     "TokenInfo",
     "TokenListResponse",
     "VerifyResponse",

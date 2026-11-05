@@ -40,7 +40,12 @@ class TieringClient:
         database: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> Any:
-        """List tiered files, optionally filtered by tier/database."""
+        """List tiered files, optionally filtered by tier/database.
+
+        Arc 2027.01.1 ignores ``tier`` when ``database`` is also given and
+        returns the database's files in every tier (Basekick-Labs/arc#1430);
+        filter on each file's ``tier`` to be safe.
+        """
         params = {
             k: v
             for k, v in {"tier": tier, "database": database, "limit": limit}.items()
