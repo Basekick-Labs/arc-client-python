@@ -101,6 +101,7 @@ class AsyncArcClient:
         self._edge_sync: Any = None
         self._diagnostics: Any = None
         self._reconciliation: Any = None
+        self._schedulers: Any = None
 
     def _get_http(self) -> AsyncHTTPClient:
         """Get or create the HTTP client."""
@@ -260,6 +261,15 @@ class AsyncArcClient:
         return self._backup
 
     @property
+    def schedulers(self) -> Any:
+        """Get the async scheduler inspection and control client."""
+        if self._schedulers is None:
+            from arc_client.management.async_schedulers import AsyncSchedulerClient
+
+            self._schedulers = AsyncSchedulerClient(self._get_http(), self._config)
+        return self._schedulers
+
+    @property
     def mqtt(self) -> Any:
         """Get the async MQTT ingestion management client (enterprise)."""
         if self._mqtt is None:
@@ -279,7 +289,7 @@ class AsyncArcClient:
 
     @property
     def diagnostics(self) -> Any:
-        """Get the async operational diagnostics client (readiness, metrics, logs, memory)."""
+        """Get the async operational diagnostics client (metrics, write protocols, logs, memory)."""
         if self._diagnostics is None:
             from arc_client.management.async_diagnostics import AsyncDiagnosticsClient
 

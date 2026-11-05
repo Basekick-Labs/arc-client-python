@@ -64,7 +64,7 @@ with ArcClient(host="localhost", token="your-token") as client:
 - **Databases**: List, create, delete databases and list measurements
 - **Management**: Retention policies, continuous queries, delete operations
 - **Enterprise**: RBAC, query governance, audit logs, query management, cluster,
-  compaction, storage tiering, backup/restore, and MQTT ingestion
+  compaction, scheduler controls, storage tiering, backup/restore, and MQTT ingestion
 - **Authentication**: Token management (create, rotate, revoke)
 
 ## Data Ingestion
@@ -401,6 +401,28 @@ print(f"Would delete {result.deleted_count} rows")
 result = client.retention.execute(policy.id, dry_run=False, confirm=True)
 ```
 
+### Scheduler inspection and controls
+
+Scheduler status is available to authenticated tokens. Reloading continuous-query
+schedules and manually triggering retention require an administrator token and
+the corresponding enterprise scheduler feature.
+
+```python
+status = client.schedulers.status()
+client.schedulers.reload_continuous_queries()
+
+# Runs all active retention policies immediately and may permanently delete data.
+client.schedulers.trigger_retention(confirm=True)
+```
+
+The retention operation refuses to send a request unless `confirm=True` is
+supplied. The async client exposes the same methods:
+
+```python
+async with AsyncArcClient(host="localhost", token="your-token") as client:
+    status = await client.schedulers.status()
+```
+
 ### Continuous Queries
 
 Aggregate and downsample data automatically:
@@ -513,6 +535,11 @@ client.compaction.trigger(database="metrics", measurement="cpu")
 client.compaction.cycles(limit=5)
 client.compaction.too_wide()
 
+# Scheduler inspection and explicit operator controls
+client.schedulers.status()  # requires an authenticated token
+client.schedulers.reload_continuous_queries()  # administrator + licensed feature
+# Retention may permanently delete data; explicit confirmation is required.
+client.schedulers.trigger_retention(confirm=True)
 client.tiering.set_policy("metrics", hot_only=True, hot_max_age_days=7)
 
 client.backup.create(databases=["metrics"])            # scoped backup
@@ -534,6 +561,11 @@ client.diagnostics.metrics()
 client.diagnostics.timeseries("api", duration_minutes=15)
 client.diagnostics.logs(level="warn", since_minutes=30, limit=200)
 client.auth.cache_stats()
+
+# Write-protocol counters on this node (any token)
+client.diagnostics.line_protocol_stats()["stats"]["total_errors"]
+client.diagnostics.msgpack_stats()    # MessagePack decoder and Arrow buffer
+client.diagnostics.msgpack_spec()     # the MessagePack write format Arc accepts
 
 # Reconciliation (enterprise clustering): dry run first, then act
 run = client.reconciliation.trigger()                 # dry run

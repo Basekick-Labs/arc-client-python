@@ -1,7 +1,8 @@
 """Synchronous operational-diagnostics client for Arc.
 
-Wraps Arc's JSON metrics, Prometheus metrics, buffered application logs, and
-the admin memory diagnostics under ``/api/v1/debug``. Readiness probes live on
+Wraps Arc's JSON metrics, Prometheus metrics, the Line Protocol and
+MessagePack write-protocol diagnostics, buffered application logs, and the
+admin memory diagnostics under ``/api/v1/debug``. Readiness probes live on
 the client itself (``readiness()`` / ``write_readiness()``).
 
 Everything returns raw dicts: these
@@ -14,6 +15,9 @@ Access (Arc ``internal/api/server.go``, ``cmd/arc/main.go``,
 * ``/ready``, ``/ready/write``, ``/metrics`` and ``/api/v1/metrics/*`` are
   public; no token is needed (they are meant for load balancers, scrapers and
   dashboards).
+* ``/api/v1/write/line-protocol/{health,stats}`` and
+  ``/api/v1/write/msgpack/{spec,stats}`` need a token, of any permission
+  (Arc 25.12.1 and later).
 * ``/api/v1/logs`` and ``/api/v1/debug/*`` require an admin token.
 """
 
@@ -129,6 +133,39 @@ class DiagnosticsClient:
             raise
         except Exception as e:
             raise ArcError(f"Diagnostics request failed (GET /metrics): {e}") from e
+
+    # Write protocols (any token) -----------------------------------------
+
+    def line_protocol_health(self) -> dict[str, Any]:
+        """Get the Line Protocol writer's ``status`` and ``service``.
+
+        Arc answers ``"healthy"`` whenever the route responds; it checks
+        nothing else. For whether this node accepts writes, use
+        ``client.write_readiness()``.
+        """
+        return self._json("get", "/api/v1/write/line-protocol/health")
+
+    def line_protocol_stats(self) -> dict[str, Any]:
+        """Get Line Protocol counters since the node started.
+
+        Returns ``status`` and ``stats``: ``total_requests``,
+        ``total_records``, ``total_bytes``, ``total_bytes_gzipped`` and
+        ``total_errors``. Per node; they reset on restart.
+        """
+        return self._json("get", "/api/v1/write/line-protocol/stats")
+
+    def msgpack_spec(self) -> dict[str, Any]:
+        """Get Arc's description of the MessagePack write format it accepts.
+
+        The ``authentication`` section is accurate from Arc 27.01.1. Earlier
+        servers say authentication is not implemented and list only
+        ``x-api-key``; the route still needs a token there.
+        """
+        return self._json("get", "/api/v1/write/msgpack/spec")
+
+    def msgpack_stats(self) -> dict[str, Any]:
+        """Get MessagePack ``decoder`` and Arrow ``buffer`` statistics (per node)."""
+        return self._json("get", "/api/v1/write/msgpack/stats")
 
     # Logs (admin) --------------------------------------------------------
 
