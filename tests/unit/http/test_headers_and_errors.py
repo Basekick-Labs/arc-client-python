@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 from pytest_httpx import HTTPXMock
 
@@ -92,3 +94,64 @@ def test_per_call_database_override(httpx_mock: HTTPXMock, client: ArcClient) ->
 
     request = httpx_mock.get_requests()[0]
     assert request.headers["x-arc-database"] == "otherdb"
+
+
+# arc-client-python#35: Arc rejects db.table names while x-arc-database is
+# set, and resolves bare names to "default" without it. Queries therefore send
+# the header only for a database the caller chose; writes keep the default.
+
+
+def _query_ok(httpx_mock: HTTPXMock) -> None:
+    httpx_mock.add_response(json={"success": True, "columns": [], "data": [], "row_count": 0})
+
+
+def test_query_without_a_chosen_database_sends_no_database_header(
+    httpx_mock: HTTPXMock,
+) -> None:
+    _query_ok(httpx_mock)
+    with ArcClient(host="testhost", port=8000) as c:
+        c.query.query("SELECT * FROM default.cpu")
+
+    assert "x-arc-database" not in httpx_mock.get_requests()[0].headers
+
+
+def test_estimate_and_arrow_without_a_chosen_database_send_no_database_header(
+    httpx_mock: HTTPXMock,
+) -> None:
+    httpx_mock.add_response(json={"success": True, "estimated_rows": 1})
+    httpx_mock.add_response(status_code=200, content=b"")
+    with ArcClient(host="testhost", port=8000) as c:
+        c.query.estimate("SELECT * FROM default.cpu")
+        # The empty body is not an Arrow stream; only the request matters.
+        with contextlib.suppress(Exception):
+            c.query.query_arrow("SELECT * FROM default.cpu")
+
+    requests = httpx_mock.get_requests()
+    assert len(requests) == 2
+    for request in requests:
+        assert "x-arc-database" not in request.headers, request.url
+
+
+def test_query_with_a_client_database_sends_it(httpx_mock: HTTPXMock, client: ArcClient) -> None:
+    _query_ok(httpx_mock)
+    client.query.query("SELECT 1")
+
+    assert httpx_mock.get_requests()[0].headers["x-arc-database"] == "mydb"
+
+
+def test_explicit_default_database_is_still_sent(httpx_mock: HTTPXMock) -> None:
+    _query_ok(httpx_mock)
+    with ArcClient(host="testhost", port=8000, database="default") as c:
+        c.query.query("SELECT 1")
+
+    assert httpx_mock.get_requests()[0].headers["x-arc-database"] == "default"
+
+
+def test_write_without_a_chosen_database_still_targets_default(
+    httpx_mock: HTTPXMock,
+) -> None:
+    httpx_mock.add_response(status_code=204)
+    with ArcClient(host="testhost", port=8000) as c:
+        c.write.write_line_protocol("cpu,host=a usage=1")
+
+    assert httpx_mock.get_requests()[0].headers["x-arc-database"] == "default"

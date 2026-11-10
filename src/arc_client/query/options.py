@@ -25,11 +25,14 @@ def status_code(error: Exception) -> Optional[int]:
     return value if isinstance(value, int) else None
 
 
-def query_headers(database: Optional[str], profile: bool) -> dict[str, str]:
-    """Headers for the JSON/msgpack/estimate query endpoints."""
-    headers: dict[str, str] = {}
-    if database:
-        headers["x-arc-database"] = database
+def query_headers(database: Optional[str], profile: bool) -> dict[str, Optional[str]]:
+    """Headers for the JSON/msgpack/estimate query endpoints.
+
+    ``database`` is the caller's choice (``ClientConfig.query_database`` when
+    the call names none). None sends no ``x-arc-database``, overriding the
+    client-wide default, so ``db.table`` names work (arc-client-python#35).
+    """
+    headers: dict[str, Optional[str]] = {"x-arc-database": database or None}
     if profile:
         # Arc compares the value with == "true" (query.go executeQuery).
         headers["x-arc-profile"] = "true"
@@ -38,11 +41,15 @@ def query_headers(database: Optional[str], profile: bool) -> dict[str, str]:
 
 def arrow_headers(
     database: Optional[str], dictionary: bool, compression: Optional[str]
-) -> dict[str, str]:
-    """Headers for the Arrow IPC endpoint, validating the opt-in encodings."""
-    headers = {"Accept": "application/vnd.apache.arrow.stream"}
-    if database:
-        headers["x-arc-database"] = database
+) -> dict[str, Optional[str]]:
+    """Headers for the Arrow IPC endpoint, validating the opt-in encodings.
+
+    ``database`` as for ``query_headers``.
+    """
+    headers: dict[str, Optional[str]] = {
+        "Accept": "application/vnd.apache.arrow.stream",
+        "x-arc-database": database or None,
+    }
     if dictionary:
         headers["x-arc-arrow-dictionary"] = "true"
     if compression is not None:

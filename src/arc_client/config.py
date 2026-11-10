@@ -49,6 +49,18 @@ class ClientConfig(BaseModel):
         return Compression.coerce(value)
 
     @property
+    def query_database(self) -> Optional[str]:
+        """The database queries name in ``x-arc-database``, or None to send none.
+
+        Only a database the caller chose. Arc rejects ``db.table`` names while
+        the header is set, and without it resolves bare names to ``default``
+        anyway, so sending the implicit default only broke ``db.table``
+        queries (arc-client-python#35). Writes still use ``database``, which
+        defaults to ``default``.
+        """
+        return self.database if "database" in self.model_fields_set else None
+
+    @property
     def base_url(self) -> str:
         """Get the base URL for the Arc server."""
         scheme = "https" if self.ssl else "http"

@@ -37,7 +37,7 @@ class ArcClient:
         host: str = "localhost",
         port: int = 8000,
         token: Optional[str] = None,
-        database: str = "default",
+        database: Optional[str] = None,
         timeout: float = 30.0,
         compression: Compression | str | bool = Compression.ZSTD,
         ssl: bool = False,
@@ -52,7 +52,9 @@ class ArcClient:
             host: Arc server hostname.
             port: Arc server port.
             token: API token for authentication.
-            database: Default database name.
+            database: Default database. Writes use "default" when unset;
+                queries send it only when set, so `db.table` names work
+                without it (#35).
             timeout: Request timeout in seconds.
             compression: Write compression codec (none/gzip/zstd, or bool for
                 back-compat). Defaults to zstd.
@@ -69,7 +71,6 @@ class ArcClient:
             host=host,
             port=port,
             token=token,
-            database=database,
             timeout=timeout,
             compression=compression,
             ssl=ssl,
@@ -77,6 +78,9 @@ class ArcClient:
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             send_installation_id=send_installation_id,
+            # Only when given, so ClientConfig can tell a chosen database
+            # from the default (ClientConfig.query_database).
+            **({"database": database} if database is not None else {}),
         )
         self._http: Optional[SyncHTTPClient] = None
 

@@ -5,6 +5,26 @@ All notable changes to `arc-tsdb-client` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`db.table` queries work without naming a database
+  ([#35](https://github.com/Basekick-Labs/arc-client-python/issues/35)).**
+  The client sent `x-arc-database: default` on every query, and Arc rejects
+  `db.table` names while that header is set, so
+  `client.query.query_pandas("SELECT * FROM default.cpu")` failed with 400.
+  Queries (JSON, msgpack, Arrow, estimate) now send the header only for a
+  database you chose: `database=` on the call, or on `ArcClient` /
+  `AsyncArcClient`. Without one, Arc resolves bare names to `default`, as
+  before.
+  - Writes and imports still target `default` when no database is given.
+  - Setting a client database (even `database="default"`) keeps the old
+    behaviour: bare names resolve to it and `db.table` is rejected. Pass
+    `database=` per call to query another database.
+  - `ArcClient(database=...)` now defaults to `None`;
+    `ClientConfig.query_database` says what queries send.
+
 ## [0.2.0] - 2026-11-05
 
 A large feature-parity release bringing the SDK up to date with the Arc server,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 import httpx
 
@@ -34,13 +34,14 @@ USER_AGENT = user_agent()
 
 def build_headers(
     config: ClientConfig,
-    extra_headers: Optional[dict[str, str]] = None,
+    extra_headers: Optional[Mapping[str, Optional[str]]] = None,
     installation_id: Optional[str] = None,
 ) -> dict[str, str]:
     """Build request headers with authentication.
 
     ``installation_id`` is resolved once per HTTP client (see
-    ``arc_client._installation``) and omitted when None.
+    ``arc_client._installation``) and omitted when None. A None value in
+    ``extra_headers`` removes that header.
     """
     headers: dict[str, str] = {
         "User-Agent": USER_AGENT,
@@ -52,7 +53,11 @@ def build_headers(
     if installation_id:
         headers[HEADER_INSTALLATION_ID] = installation_id
     if extra_headers:
-        headers.update(extra_headers)
+        for name, value in extra_headers.items():
+            if value is None:
+                headers.pop(name, None)
+            else:
+                headers[name] = value
     return headers
 
 
@@ -352,7 +357,7 @@ class HTTPClientBase:
 
     def _prepare_request_kwargs(
         self,
-        headers: Optional[dict[str, str]] = None,
+        headers: Optional[Mapping[str, Optional[str]]] = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Prepare common request kwargs."""

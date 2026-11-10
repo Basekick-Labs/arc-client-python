@@ -102,7 +102,7 @@ class QueryClient:
             response = self._http.post(
                 "/api/v1/query",
                 json={"sql": sql},
-                headers=query_headers(database, profile) or None,
+                headers=query_headers(database or self._config.query_database, profile) or None,
                 idempotent=True,
             )
             return query_response_from_json(response)
@@ -152,7 +152,7 @@ class QueryClient:
         if not sql or not sql.strip():
             raise ArcValidationError("SQL query cannot be empty")
 
-        headers = query_headers(database, profile)
+        headers = query_headers(database or self._config.query_database, profile)
         headers["Accept"] = "application/msgpack"
 
         try:
@@ -305,7 +305,7 @@ class QueryClient:
         if not sql or not sql.strip():
             raise ArcValidationError("SQL query cannot be empty")
 
-        headers = arrow_headers(database, dictionary, compression)
+        headers = arrow_headers(database or self._config.query_database, dictionary, compression)
 
         try:
             response = self._http.post(
@@ -356,7 +356,7 @@ class QueryClient:
             response = self._http.post(
                 "/api/v1/query/estimate",
                 json={"sql": sql},
-                headers=query_headers(database, False) or None,
+                headers=query_headers(database or self._config.query_database, False) or None,
                 idempotent=True,
             )
 
