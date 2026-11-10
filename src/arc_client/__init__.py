@@ -3,7 +3,7 @@
 # Defined before submodule imports so modules that read arc_client.__version__
 # (e.g. the User-Agent header builder) can import it without a circular-import
 # failure during package initialization.
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from arc_client._sentinels import CLEAR
 from arc_client.async_client import AsyncArcClient

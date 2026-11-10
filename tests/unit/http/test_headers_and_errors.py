@@ -37,7 +37,7 @@ def test_headers_include_auth_db_and_versioned_user_agent(
     assert request.headers["Authorization"] == "Bearer secret-token"
     assert request.headers["x-arc-database"] == "mydb"
     assert request.headers["User-Agent"] == USER_AGENT
-    assert USER_AGENT.startswith("arc-client-python/0.2.0 (python/")
+    assert USER_AGENT.startswith("arc-client-python/0.2.1 (python/")
 
 
 def test_user_agent_matches_package_version(httpx_mock: HTTPXMock, client: ArcClient) -> None:
