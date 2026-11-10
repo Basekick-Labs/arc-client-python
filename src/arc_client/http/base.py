@@ -48,8 +48,9 @@ def build_headers(
     }
     if config.token:
         headers["Authorization"] = f"Bearer {config.token}"
-    if config.database:
-        headers["x-arc-database"] = config.database
+    # The client-wide database for every non-query request; query requests
+    # override it with their own value, or None to send none (#35).
+    headers["x-arc-database"] = config.default_database
     if installation_id:
         headers[HEADER_INSTALLATION_ID] = installation_id
     if extra_headers:

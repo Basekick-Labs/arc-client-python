@@ -15,7 +15,11 @@ class ClientConfig(BaseModel):
     host: str = Field(default="localhost", description="Arc server hostname")
     port: int = Field(default=8000, description="Arc server port")
     token: Optional[str] = Field(default=None, description="API token for authentication")
-    database: str = Field(default="default", description="Default database name")
+    database: Optional[str] = Field(
+        default=None,
+        description="Database you chose for this client. Queries send it as "
+        "x-arc-database only when set; writes and imports use 'default' when unset.",
+    )
     timeout: float = Field(default=30.0, description="Request timeout in seconds")
     compression: Union[Compression, str, bool] = Field(
         default=Compression.ZSTD,
@@ -55,10 +59,14 @@ class ClientConfig(BaseModel):
         Only a database the caller chose. Arc rejects ``db.table`` names while
         the header is set, and without it resolves bare names to ``default``
         anyway, so sending the implicit default only broke ``db.table``
-        queries (arc-client-python#35). Writes still use ``database``, which
-        defaults to ``default``.
+        queries (arc-client-python#35).
         """
-        return self.database if "database" in self.model_fields_set else None
+        return self.database or None
+
+    @property
+    def default_database(self) -> str:
+        """The database writes, imports and measurement reads use when none is given."""
+        return self.database or "default"
 
     @property
     def base_url(self) -> str:

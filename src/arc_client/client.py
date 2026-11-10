@@ -78,9 +78,7 @@ class ArcClient:
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             send_installation_id=send_installation_id,
-            # Only when given, so ClientConfig can tell a chosen database
-            # from the default (ClientConfig.query_database).
-            **({"database": database} if database is not None else {}),
+            database=database,
         )
         self._http: Optional[SyncHTTPClient] = None
 

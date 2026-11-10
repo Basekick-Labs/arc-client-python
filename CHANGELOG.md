@@ -22,8 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Setting a client database (even `database="default"`) keeps the old
     behaviour: bare names resolve to it and `db.table` is rejected. Pass
     `database=` per call to query another database.
-  - `ArcClient(database=...)` now defaults to `None`;
-    `ClientConfig.query_database` says what queries send.
+  - `ArcClient(database=...)` and `ClientConfig.database` now default to
+    `None`. `ClientConfig.default_database` is what writes use (`"default"`
+    when unset) and `ClientConfig.query_database` what queries send.
+  - Arc's audit log records the database from the header, so a query without
+    one is logged with an empty database instead of `default`.
 
 ## [0.2.0] - 2026-11-05
 

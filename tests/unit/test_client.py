@@ -16,7 +16,9 @@ class TestClientConfig:
         assert config.host == "localhost"
         assert config.port == 8000
         assert config.token is None
-        assert config.database == "default"
+        assert config.database is None
+        assert config.default_database == "default"
+        assert config.query_database is None
         assert config.timeout == 30.0
         assert config.compression is Compression.ZSTD
         assert config.ssl is False

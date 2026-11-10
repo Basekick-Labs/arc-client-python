@@ -155,3 +155,16 @@ def test_write_without_a_chosen_database_still_targets_default(
         c.write.write_line_protocol("cpu,host=a usage=1")
 
     assert httpx_mock.get_requests()[0].headers["x-arc-database"] == "default"
+
+
+def test_unset_database_survives_a_config_round_trip() -> None:
+    from arc_client.config import ClientConfig
+
+    config = ClientConfig(host="testhost")
+    for rebuilt in (
+        ClientConfig.model_validate(config.model_dump()),
+        ClientConfig.model_validate_json(config.model_dump_json()),
+        config.model_copy(update={"host": "other"}),
+    ):
+        assert rebuilt.query_database is None
+        assert rebuilt.default_database == "default"

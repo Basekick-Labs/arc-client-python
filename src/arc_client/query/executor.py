@@ -102,7 +102,7 @@ class QueryClient:
             response = self._http.post(
                 "/api/v1/query",
                 json={"sql": sql},
-                headers=query_headers(database or self._config.query_database, profile) or None,
+                headers=query_headers(database or self._config.query_database, profile),
                 idempotent=True,
             )
             return query_response_from_json(response)
@@ -356,7 +356,7 @@ class QueryClient:
             response = self._http.post(
                 "/api/v1/query/estimate",
                 json={"sql": sql},
-                headers=query_headers(database or self._config.query_database, False) or None,
+                headers=query_headers(database or self._config.query_database, False),
                 idempotent=True,
             )
 
@@ -473,7 +473,7 @@ class QueryClient:
             ArcQueryError: If Arc rejects the request (``status_code`` set).
         """
         params = measurement_params(
-            measurement, database or self._config.database, limit, offset, order_by, where
+            measurement, database or self._config.default_database, limit, offset, order_by, where
         )
         try:
             response = self._http.get(
