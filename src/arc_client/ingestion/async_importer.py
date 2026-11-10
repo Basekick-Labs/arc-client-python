@@ -85,7 +85,7 @@ class AsyncImportClient:
             "skip_rows": skip_rows,
         }
         result = await self._post_import(
-            "/api/v1/import/csv", source, params, database or self._config.database
+            "/api/v1/import/csv", source, params, database or self._config.default_database
         )
         return ImportResult.model_validate(result)
 
@@ -104,7 +104,7 @@ class AsyncImportClient:
             "time_format": time_format or None,
         }
         result = await self._post_import(
-            "/api/v1/import/parquet", source, params, database or self._config.database
+            "/api/v1/import/parquet", source, params, database or self._config.default_database
         )
         return ImportResult.model_validate(result)
 
@@ -118,7 +118,7 @@ class AsyncImportClient:
         """Import a line-protocol file. See ImportClient.import_lp for details."""
         params = {"precision": precision, "measurement": measurement}
         result = await self._post_import(
-            "/api/v1/import/lp", source, params, database or self._config.database
+            "/api/v1/import/lp", source, params, database or self._config.default_database
         )
         return LPImportResult.model_validate(result)
 
@@ -133,7 +133,7 @@ class AsyncImportClient:
             "/api/v1/import/tle",
             source,
             {},
-            database or self._config.database,
+            database or self._config.default_database,
             extra_headers={"x-arc-measurement": measurement},
         )
         return TLEImportResult.model_validate(result)

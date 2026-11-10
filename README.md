@@ -598,7 +598,7 @@ client = ArcClient(
     host="localhost",              # Arc server hostname
     port=8000,                     # Arc server port (default: 8000)
     token="your-token",            # API token
-    database="default",            # Default database
+    database=None,                 # Optional: queries send it as x-arc-database; see below
     timeout=30.0,                  # Request timeout in seconds
     compression=Compression.ZSTD,  # "zstd" (default), "gzip", "none", or a bool
     ssl=False,                     # Use HTTPS
@@ -611,6 +611,13 @@ client = ArcClient(
 `compression` accepts a `Compression` enum, a string (`"zstd"`/`"gzip"`/`"none"`),
 or a bool for backward compatibility (`True` → gzip, `False` → none). Arc detects
 the codec from the payload's magic bytes, so no `Content-Encoding` header is sent.
+
+`database` is optional. Writes and imports go to `default` when it is unset.
+Queries send it as `x-arc-database` only when it is set, because Arc rejects
+`db.table` names while that header is present: leave it unset to query
+`default.cpu` or `iot.mem` by full name (bare names resolve to `default`), or
+set it to query bare names in another database. A `database=` argument on a
+call always wins.
 
 ## Error Handling
 

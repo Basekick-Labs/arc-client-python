@@ -37,7 +37,7 @@ class AsyncArcClient:
         host: str = "localhost",
         port: int = 8000,
         token: Optional[str] = None,
-        database: str = "default",
+        database: Optional[str] = None,
         timeout: float = 30.0,
         compression: Compression | str | bool = Compression.ZSTD,
         ssl: bool = False,
@@ -52,7 +52,9 @@ class AsyncArcClient:
             host: Arc server hostname.
             port: Arc server port.
             token: API token for authentication.
-            database: Default database name.
+            database: Default database. Writes use "default" when unset;
+                queries send it only when set, so `db.table` names work
+                without it (#35).
             timeout: Request timeout in seconds.
             compression: Write compression codec (none/gzip/zstd, or bool for
                 back-compat). Defaults to zstd.
@@ -69,7 +71,6 @@ class AsyncArcClient:
             host=host,
             port=port,
             token=token,
-            database=database,
             timeout=timeout,
             compression=compression,
             ssl=ssl,
@@ -77,6 +78,7 @@ class AsyncArcClient:
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             send_installation_id=send_installation_id,
+            database=database,
         )
         self._http: Optional[AsyncHTTPClient] = None
 

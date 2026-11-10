@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 import httpx
 
@@ -50,7 +50,7 @@ class AsyncHTTPClient(HTTPClientBase):
         method: str,
         path: str,
         *,
-        headers: Optional[dict[str, str]] = None,
+        headers: Optional[Mapping[str, Optional[str]]] = None,
         idempotent: bool = False,
         retry_if: Optional[RetryPredicate] = None,
         **kwargs: Any,
@@ -122,7 +122,7 @@ class AsyncHTTPClient(HTTPClientBase):
         self,
         path: str,
         params: Optional[dict[str, Any]] = None,
-        headers: Optional[dict[str, str]] = None,
+        headers: Optional[Mapping[str, Optional[str]]] = None,
         retry_if: Optional[RetryPredicate] = None,
     ) -> httpx.Response:
         """Make a GET request."""
@@ -134,7 +134,7 @@ class AsyncHTTPClient(HTTPClientBase):
         json: Optional[Any] = None,
         content: Optional[bytes] = None,
         params: Optional[dict[str, Any]] = None,
-        headers: Optional[dict[str, str]] = None,
+        headers: Optional[Mapping[str, Optional[str]]] = None,
         files: Optional[Any] = None,
         data: Optional[Any] = None,
         idempotent: bool = False,
@@ -173,7 +173,7 @@ class AsyncHTTPClient(HTTPClientBase):
         path: str,
         json: Optional[Any] = None,
         params: Optional[dict[str, Any]] = None,
-        headers: Optional[dict[str, str]] = None,
+        headers: Optional[Mapping[str, Optional[str]]] = None,
     ) -> httpx.Response:
         """Make a PUT request."""
         extra: dict[str, Any] = {}
@@ -186,7 +186,7 @@ class AsyncHTTPClient(HTTPClientBase):
         path: str,
         json: Optional[Any] = None,
         params: Optional[dict[str, Any]] = None,
-        headers: Optional[dict[str, str]] = None,
+        headers: Optional[Mapping[str, Optional[str]]] = None,
     ) -> httpx.Response:
         """Make a PATCH request."""
         extra: dict[str, Any] = {}
@@ -198,7 +198,7 @@ class AsyncHTTPClient(HTTPClientBase):
         self,
         path: str,
         params: Optional[dict[str, Any]] = None,
-        headers: Optional[dict[str, str]] = None,
+        headers: Optional[Mapping[str, Optional[str]]] = None,
         timeout: Optional[float] = None,
     ) -> httpx.Response:
         """Make a DELETE request."""
