@@ -5,6 +5,30 @@ All notable changes to `arc-tsdb-client` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Compaction cycles carry Arc's `boot_id` (Arc 2027.01.1+).** Cycle ids
+  restart at 1 with each Arc process, so after a restart, or behind a load
+  balancer, the same number can name another cycle
+  ([arc#1884](https://github.com/Basekick-Labs/arc/issues/1884)).
+  - `compaction.cycle(cycle_id, boot_id=...)` sends the `boot_id` the trigger
+    returned. When the answering process is another one, it raises
+    `ArcCycleBootMismatchError` (a subclass of `ArcNotFoundError`) with
+    `cycle_id`, `boot_id`, `server_boot_id` and `lease_holder`, instead of
+    returning another cycle's record.
+  - `compaction.history(cycle_id=..., boot_id=...)` passes it too; Arc then
+    returns no jobs for another process's id.
+- **`compaction.trigger(wait=...)`** (seconds or a `timedelta`, Arc
+  2027.01.1+) waits for the cycle to end and returns its record; read its
+  `status`, since a failed or stopped cycle answers too. When the wait runs
+  out the answer has `"status": "running"`. Arc caps the wait at 10 minutes;
+  the request's timeout is raised to cover it. Older servers ignore it.
+- A trigger sent while Arc shuts down raises `ArcServerError` (503) with
+  `response_body["stopping"]` set
+  ([arc#1887](https://github.com/Basekick-Labs/arc/issues/1887)).
+
 ## [0.2.1] - 2026-11-10
 
 ### Fixed

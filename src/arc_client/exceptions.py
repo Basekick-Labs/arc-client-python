@@ -135,6 +135,43 @@ class ArcNotFoundError(ArcError):
     pass
 
 
+class ArcCycleBootMismatchError(ArcNotFoundError):
+    """A compaction cycle lookup reached another Arc process (Arc 2027.01.1+).
+
+    Cycle ids are counted from 1 in each Arc process. A lookup that sends the
+    ``boot_id`` its trigger returned is refused with this error when the
+    process answering is not that one: Arc restarted since, or the request
+    reached another node. A record there with the same number is another
+    cycle, so the waited cycle's outcome is not known from this server.
+
+    Attributes:
+        cycle_id: The cycle id looked up.
+        boot_id: The ``boot_id`` the lookup sent.
+        server_boot_id: The answering process's ``boot_id``.
+        lease_holder: The node holding the compactor lease, on a cluster.
+    """
+
+    def __init__(
+        self,
+        cycle_id: int,
+        boot_id: str,
+        server_boot_id: Optional[str],
+        lease_holder: Optional[str] = None,
+    ) -> None:
+        message = (
+            f"compaction cycle {cycle_id} was started by another Arc process "
+            f"(boot_id {boot_id}; the server now answers as {server_boot_id}): "
+            "it restarted, or the request reached another node"
+        )
+        if lease_holder:
+            message += f"; compactor lease holder is {lease_holder!r}"
+        super().__init__(message)
+        self.cycle_id = cycle_id
+        self.boot_id = boot_id
+        self.server_boot_id = server_boot_id
+        self.lease_holder = lease_holder
+
+
 class ArcRateLimitError(ArcError):
     """Rate limit exceeded."""
 

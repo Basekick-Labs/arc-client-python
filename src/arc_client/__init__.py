@@ -13,6 +13,7 @@ from arc_client.config import ClientConfig
 from arc_client.exceptions import (
     ArcAuthenticationError,
     ArcConnectionError,
+    ArcCycleBootMismatchError,
     ArcError,
     ArcIngestionError,
     ArcIngestRefusedError,
@@ -46,6 +47,7 @@ __all__ = [
     "ArcPartialWriteError",
     "ArcIngestRefusedError",
     "ArcValidationError",
+    "ArcCycleBootMismatchError",
     "ArcNotFoundError",
     "ArcRateLimitError",
     "ArcServerError",

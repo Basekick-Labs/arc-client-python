@@ -123,3 +123,94 @@ async def test_reads_are_admin_only(httpx_mock, async_mode):
         client = await enter_client(stack, async_mode)
         with pytest.raises(ArcPermissionError):
             await call(client, "cycles")
+
+
+async def test_trigger_wait_sends_a_duration_and_covers_it_with_the_timeout(httpx_mock, async_mode):
+    httpx_mock.add_response(
+        method="POST", json={"cycle_id": 1, "status": "completed", "boot_id": "ab12"}
+    )
+    async with AsyncExitStack() as stack:
+        client = await enter_client(stack, async_mode)
+        result = await call(client, "trigger", database="db", wait=90)
+    assert result["status"] == "completed"
+    request = httpx_mock.get_request()
+    assert dict(request.url.params) == {"database": "db", "wait": "90000ms"}
+    # The request outlives the wait (Arc caps it at 10 minutes).
+    assert request.extensions["timeout"]["read"] >= 120
+
+
+async def test_trigger_wait_accepts_a_timedelta_and_caps_the_timeout(httpx_mock, async_mode):
+    from datetime import timedelta
+
+    httpx_mock.add_response(method="POST", json={"cycle_id": 1, "status": "running"})
+    async with AsyncExitStack() as stack:
+        client = await enter_client(stack, async_mode)
+        await call(client, "trigger", wait=timedelta(hours=1))
+    request = httpx_mock.get_request()
+    assert request.url.params["wait"] == "3600000ms"
+    assert request.extensions["timeout"]["read"] == 630
+
+
+@pytest.mark.parametrize("bad", [0, -5, True, "5m"])
+async def test_trigger_wait_must_be_positive_seconds(httpx_mock, async_mode, bad):
+    async with AsyncExitStack() as stack:
+        client = await enter_client(stack, async_mode)
+        with pytest.raises(ArcValidationError):
+            await call(client, "trigger", wait=bad)
+    assert httpx_mock.get_requests() == []
+
+
+async def test_cycle_and_history_send_boot_id(httpx_mock, async_mode):
+    httpx_mock.add_response(method="GET", url=f"{BASE}/cycles/4?boot_id=ab12", json={"cycle_id": 4})
+    httpx_mock.add_response(
+        method="GET", url=f"{BASE}/history?cycle_id=4&boot_id=ab12", json={"recent_jobs": []}
+    )
+    async with AsyncExitStack() as stack:
+        client = await enter_client(stack, async_mode)
+        assert (await call(client, "cycle", 4, boot_id="ab12"))["cycle_id"] == 4
+        await call(client, "history", cycle_id=4, boot_id="ab12")
+
+
+async def test_cycle_from_another_process_raises_boot_mismatch(httpx_mock, async_mode):
+    from arc_client import ArcCycleBootMismatchError
+
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{BASE}/cycles/1?boot_id=ab12",
+        status_code=404,
+        json={
+            "error": "no record",
+            "cycle_id": 1,
+            "boot_id": "cd34",
+            "boot_id_mismatch": True,
+            "lease_holder": "n2",
+        },
+    )
+    async with AsyncExitStack() as stack:
+        client = await enter_client(stack, async_mode)
+        with pytest.raises(ArcCycleBootMismatchError) as exc:
+            await call(client, "cycle", 1, boot_id="ab12")
+    err = exc.value
+    assert isinstance(err, ArcNotFoundError)
+    assert (err.cycle_id, err.boot_id, err.server_boot_id, err.lease_holder) == (
+        1,
+        "ab12",
+        "cd34",
+        "n2",
+    )
+    assert err.response_body["boot_id_mismatch"] is True
+
+
+async def test_trigger_while_stopping_keeps_the_marker(httpx_mock, async_mode):
+    from arc_client.exceptions import ArcServerError
+
+    httpx_mock.add_response(
+        method="POST",
+        status_code=503,
+        json={"error": "the server is shutting down", "stopping": True},
+    )
+    async with AsyncExitStack() as stack:
+        client = await enter_client(stack, async_mode)
+        with pytest.raises(ArcServerError) as exc:
+            await call(client, "trigger")
+    assert exc.value.response_body["stopping"] is True
