@@ -535,6 +535,8 @@ client.cluster.demote_writer("writer-1", confirm=True)
 client.cluster.policies(kind="retention")              # on the Raft leader
 
 client.compaction.trigger(database="metrics", measurement="cpu")
+cycle = client.compaction.trigger(database="metrics", wait=120)  # Arc 2027.01.1+: waits for the end
+client.compaction.cycle(cycle["cycle_id"], boot_id=cycle["boot_id"])
 client.compaction.cycles(limit=5)
 client.compaction.too_wide()
 
